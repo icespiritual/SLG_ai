@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>戰棋遊戲</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            background: #000;
+        }
+
+        .page {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: none;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+        /* 開始頁面樣式 */
+        #startPage {
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .start-button {
+            background: linear-gradient(45deg, #ff6b6b, #ff8e8e);
+            border: none;
+            color: white;
+            font-size: 48px;
+            font-weight: bold;
+            padding: 30px 60px;
+            border-radius: 15px;
+            cursor: pointer;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+            transition: all 0.3s ease;
+        }
+
+        .start-button:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 24px rgba(0,0,0,0.4);
+            background: linear-gradient(45deg, #ff5252, #ff7979);
+        }
+
+        /* 主選單頁面樣式 */
+        #mainMenuPage {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            position: relative;
+        }
+
+        .menu-buttons {
+            position: absolute;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 20px;
+        }
+
+        .menu-button {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(45deg, #4facfe, #00f2fe);
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        .menu-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+        }
+
+        .battle-button {
+            position: absolute;
+            bottom: 50px;
+            right: 50px;
+            width: 120px;
+            height: 120px;
+            background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+            border: none;
+            border-radius: 15px;
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+        }
+
+        .battle-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.4);
+        }
+
+        /* 戰鬥頁面樣式 */
+        #battlePage {
+            background: #2c3e50;
+            position: relative;
+        }
+
+        .battle-grid {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .back-button {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255,255,255,0.2);
+            border: 2px solid white;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .back-button:hover {
+            background: rgba(255,255,255,0.3);
+        }
+    </style>
+</head>
+<body>
+    <!-- 開始頁面 -->
+    <div id="startPage" class="page active">
+        <button class="start-button" onclick="gameManager.switchPage('mainMenu')">START</button>
+    </div>
+
+    <!-- 主選單頁面 -->
+    <div id="mainMenuPage" class="page">
+        <div class="menu-buttons">
+            <button class="menu-button" onclick="alert('功能開發中')"></button>
+            <button class="menu-button" onclick="alert('功能開發中')"></button>
+            <button class="menu-button" onclick="alert('功能開發中')"></button>
+            <button class="menu-button" onclick="alert('功能開發中')"></button>
+        </div>
+        <button class="battle-button" onclick="gameManager.switchPage('battle')">Battle</button>
+    </div>
+
+    <!-- 戰鬥頁面 -->
+    <div id="battlePage" class="page">
+        <button class="back-button" onclick="gameManager.switchPage('mainMenu')">← 返回</button>
+        <canvas id="battleCanvas" class="battle-grid"></canvas>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
