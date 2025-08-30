@@ -5,7 +5,7 @@ const GAME_CONFIG = {
     // 戰鬥網格配置
     GRID_COLS: 12,  // 網格列數
     GRID_ROWS: 8,   // 網格行數
-    CELL_SIZE: 50,  // 每個格子的大小(像素)
+    CELL_SIZE: 200,  // 每個格子的大小(像素) - 放大4倍 (50 * 4 = 200)
 };
 
 // 遊戲管理器
@@ -16,6 +16,14 @@ class GameManager {
         this.eventHandlers = {};
         this.battleCanvas = null;
         this.battleCtx = null;
+        
+        // 拖曳相關變數
+        this.isDragging = false;
+        this.dragStartX = 0;
+        this.dragStartY = 0;
+        this.battleOffsetX = 0;
+        this.battleOffsetY = 0;
+        this.battleContainer = null;
         
         this.initializeEventHandlers();
     }
@@ -35,7 +43,10 @@ class GameManager {
             battle: {
                 keydown: (e) => this.handleBattleKeydown(e),
                 click: (e) => this.handleBattleClick(e),
-                mousemove: (e) => this.handleBattleMouseMove(e)
+                mousedown: (e) => this.handleBattleMouseDown(e),
+                mousemove: (e) => this.handleBattleMouseMove(e),
+                mouseup: (e) => this.handleBattleMouseUp(e),
+                contextmenu: (e) => e.preventDefault() // 禁用右鍵選單
             }
         };
     }
@@ -86,7 +97,13 @@ class GameManager {
     // 初始化戰鬥頁面
     initializeBattlePage() {
         this.battleCanvas = document.getElementById('battleCanvas');
+        this.battleContainer = document.getElementById('battleContainer');
         this.battleCtx = this.battleCanvas.getContext('2d');
+        
+        // 重置拖曳狀態
+        this.isDragging = false;
+        this.battleOffsetX = 0;
+        this.battleOffsetY = 0;
         
         // 設置canvas大小
         const canvasWidth = GAME_CONFIG.GRID_COLS * GAME_CONFIG.CELL_SIZE;
@@ -94,6 +111,9 @@ class GameManager {
         
         this.battleCanvas.width = canvasWidth;
         this.battleCanvas.height = canvasHeight;
+        
+        // 重置畫布位置
+        this.updateBattlePosition();
         
         // 繪製戰鬥網格
         this.drawBattleGrid();
@@ -134,6 +154,15 @@ class GameManager {
         }
         
         console.log(`繪製戰鬥網格: ${cols} x ${rows}`);
+    }
+
+    // 更新戰鬥畫面位置
+    updateBattlePosition() {
+        if (this.battleCanvas) {
+            const translateX = -50 + (this.battleOffsetX / window.innerWidth) * 100;
+            const translateY = -50 + (this.battleOffsetY / window.innerHeight) * 100;
+            this.battleCanvas.style.transform = `translate(${translateX}%, ${translateY}%)`;
+        }
     }
 
     // 添加事件監聽器
@@ -188,8 +217,37 @@ class GameManager {
         console.log(`戰鬥頁面按鍵: ${e.code}`);
     }
 
+    handleBattleMouseDown(e) {
+        if (this.battleContainer && (e.target === this.battleContainer || e.target === this.battleCanvas)) {
+            this.isDragging = true;
+            this.dragStartX = e.clientX - this.battleOffsetX;
+            this.dragStartY = e.clientY - this.battleOffsetY;
+            this.battleContainer.classList.add('dragging');
+            e.preventDefault();
+        }
+    }
+
+    handleBattleMouseMove(e) {
+        if (this.isDragging) {
+            this.battleOffsetX = e.clientX - this.dragStartX;
+            this.battleOffsetY = e.clientY - this.dragStartY;
+            this.updateBattlePosition();
+            e.preventDefault();
+        }
+    }
+
+    handleBattleMouseUp(e) {
+        if (this.isDragging) {
+            this.isDragging = false;
+            if (this.battleContainer) {
+                this.battleContainer.classList.remove('dragging');
+            }
+        }
+    }
+
     handleBattleClick(e) {
-        if (this.battleCanvas && e.target === this.battleCanvas) {
+        // 只有在沒有拖曳的情況下才處理點擊
+        if (!this.isDragging && this.battleCanvas && e.target === this.battleCanvas) {
             const rect = this.battleCanvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
@@ -199,10 +257,6 @@ class GameManager {
             
             console.log(`點擊網格位置: (${gridX}, ${gridY})`);
         }
-    }
-
-    handleBattleMouseMove(e) {
-        // 滑鼠移動處理（可用於顯示網格高亮等）
     }
 }
 

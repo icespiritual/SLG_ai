@@ -114,6 +114,21 @@
         #battlePage {
             background: #2c3e50;
             position: relative;
+            overflow: hidden;
+        }
+
+        .battle-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            cursor: grab;
+        }
+
+        .battle-container.dragging {
+            cursor: grabbing;
         }
 
         .battle-grid {
@@ -162,7 +177,9 @@
     <!-- 戰鬥頁面 -->
     <div id="battlePage" class="page">
         <button class="back-button" onclick="gameManager.switchPage('mainMenu')">← 返回</button>
-        <canvas id="battleCanvas" class="battle-grid"></canvas>
+        <div class="battle-container" id="battleContainer">
+            <canvas id="battleCanvas" class="battle-grid"></canvas>
+        </div>
     </div>
 
     <script src="script.js"></script>
