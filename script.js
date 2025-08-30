@@ -16,11 +16,81 @@ const GAME_CONFIG = {
 
 // 角色類別
 class Character {
-    constructor(gridX, gridY, spriteImage) {
+    constructor(gridX, gridY, spriteImage, stats = {}, isEnemy = false) {
         this.gridX = gridX;      // 網格座標 X
         this.gridY = gridY;      // 網格座標 Y
         this.spriteImage = spriteImage;  // 角色圖片
         this.isLoaded = false;   // 圖片是否載入完成
+        this.isEnemy = isEnemy;  // 是否為敵人
+        
+        // 角色屬性
+        this.stats = {
+            hp: stats.hp || 100,           // 當前生命值
+            maxhp: stats.maxhp || 100,     // 最大生命值
+            mp: stats.mp || 50,            // 當前魔力值
+            maxmp: stats.maxmp || 50,      // 最大魔力值
+            str: stats.str || 15,          // 力量 (物理攻擊力)
+            def: stats.def || 10,          // 防禦 (物理防禦力)
+            mstr: stats.mstr || 12,        // 魔力 (魔法攻擊力)
+            mdef: stats.mdef || 8,         // 魔防 (魔法防禦力)
+            spd: stats.spd || 5,           // 速度
+            mv: stats.mv || 3,             // 移動力
+            range: stats.range || 1        // 攻擊射程
+        };
+    }
+    
+    // 取得角色狀態資訊
+    getStatusInfo() {
+        return {
+            type: this.isEnemy ? '敵人' : '我方',
+            hp: `${this.stats.hp}/${this.stats.maxhp}`,
+            mp: `${this.stats.mp}/${this.stats.maxmp}`,
+            str: this.stats.str,
+            def: this.stats.def,
+            mstr: this.stats.mstr,
+            mdef: this.stats.mdef,
+            spd: this.stats.spd,
+            mv: this.stats.mv,
+            range: this.stats.range
+        };
+    }
+    
+    // 設定角色屬性
+    setStats(newStats) {
+        Object.assign(this.stats, newStats);
+        // 確保當前值不超過最大值
+        this.stats.hp = Math.min(this.stats.hp, this.stats.maxhp);
+        this.stats.mp = Math.min(this.stats.mp, this.stats.maxmp);
+    }
+    
+    // 受到傷害
+    takeDamage(damage) {
+        this.stats.hp = Math.max(0, this.stats.hp - damage);
+        return this.stats.hp <= 0; // 返回是否死亡
+    }
+    
+    // 恢復生命值
+    heal(amount) {
+        this.stats.hp = Math.min(this.stats.maxhp, this.stats.hp + amount);
+    }
+    
+    // 消耗魔力
+    consumeMP(amount) {
+        if (this.stats.mp >= amount) {
+            this.stats.mp -= amount;
+            return true; // 成功消耗
+        }
+        return false; // 魔力不足
+    }
+    
+    // 恢復魔力
+    restoreMP(amount) {
+        this.stats.mp = Math.min(this.stats.maxmp, this.stats.mp + amount);
+    }
+    
+    // 檢查是否存活
+    isAlive() {
+        return this.stats.hp > 0;
     }
     
     // 繪製角色
@@ -70,6 +140,36 @@ class Character {
         
         // 恢復默認設置
         ctx.imageSmoothingEnabled = true;
+        
+        // 繪製血條
+        this.drawHealthBar(ctx, charX, charY, charWidth, charHeight);
+    }
+    
+    // 繪製血條
+    drawHealthBar(ctx, charX, charY, charWidth, charHeight) {
+        const barWidth = charWidth * 0.9; // 血條寬度為角色寬度的90%
+        const barHeight = charHeight * 0.08; // 血條高度為角色高度的8%
+        const barX = charX + (charWidth - barWidth) / 2; // 置中
+        const barY = charY - barHeight * 1.5; // 在角色頭上
+        
+        // 計算血量百分比
+        const healthPercent = this.stats.hp / this.stats.maxhp;
+        
+        ctx.save();
+        
+        // 繪製血條背景（黑色邊框）
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillRect(barX - 1, barY - 1, barWidth + 2, barHeight + 2);
+        
+        // 繪製血條背景（深紅色）
+        ctx.fillStyle = 'rgba(128, 0, 0, 0.8)';
+        ctx.fillRect(barX, barY, barWidth, barHeight);
+        
+        // 繪製當前血量（綠色）
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.9)';
+        ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
+        
+        ctx.restore();
     }
 }
 
@@ -90,9 +190,24 @@ class GameManager {
         this.battleOffsetY = 0;
         this.battleContainer = null;
         
+        // 縮放相關變數
+        this.zoomLevel = 1.0;
+        this.minZoom = 0.2;
+        this.maxZoom = 3.0;
+        this.zoomStep = 0.1;
+        
         // 角色系統
         this.characters = [];
         this.characterSprites = {};
+        
+        // 移動系統
+        this.selectedCharacter = null;
+        this.movementRange = [];
+        
+        // 攻擊系統
+        this.attackRange = [];
+        this.gameState = 'normal'; // 'normal', 'moving', 'attacking'
+        this.cancelButton = null;
         
         this.initializeEventHandlers();
     }
@@ -115,6 +230,7 @@ class GameManager {
                 mousedown: (e) => this.handleBattleMouseDown(e),
                 mousemove: (e) => this.handleBattleMouseMove(e),
                 mouseup: (e) => this.handleBattleMouseUp(e),
+                wheel: (e) => this.handleBattleWheel(e),
                 contextmenu: (e) => e.preventDefault() // 禁用右鍵選單
             }
         };
@@ -164,34 +280,73 @@ class GameManager {
     }
 
     // 載入角色圖片
-    loadCharacterSprite(filename) {
+    loadCharacterSprite(filename, folder = 'chara') {
         return new Promise((resolve, reject) => {
             const img = new Image();
             img.onload = () => {
-                this.characterSprites[filename] = img;
+                this.characterSprites[`${folder}/${filename}`] = img;
                 resolve(img);
             };
             img.onerror = (error) => {
-                console.error(`無法載入角色圖片: ${filename}`, error);
+                console.error(`無法載入角色圖片: ${folder}/${filename}`, error);
                 reject(error);
             };
-            img.src = `chara/${filename}`;
+            img.src = `${folder}/${filename}`;
         });
     }
 
     // 初始化角色
     async initializeCharacters() {
         try {
-            // 載入角色圖片
-            const spriteImage = await this.loadCharacterSprite('000.png');
+            // 載入主角圖片
+            const playerSpriteImage = await this.loadCharacterSprite('000.png', 'chara');
             
-            // 創建角色並放在 (6, 4) 位置
-            const character = new Character(6, 4, spriteImage);
-            character.isLoaded = true;
+            // 設定主角屬性
+            const playerStats = {
+                hp: 120,
+                maxhp: 120,
+                mp: 60,
+                maxmp: 60,
+                str: 28,
+                def: 12,
+                mstr: 14,
+                mdef: 10,
+                spd: 7,
+                mv: 3,
+                range: 1
+            };
             
-            this.characters = [character];
+            // 創建主角並放在 (6, 4) 位置
+            const player = new Character(6, 4, playerSpriteImage, playerStats, false);
+            player.isLoaded = true;
+            
+            // 載入敵人圖片
+            const enemySpriteImage = await this.loadCharacterSprite('000.png', 'enemy');
+            
+            // 設定敵人屬性
+            const enemyStats = {
+                hp: 100,
+                maxhp: 100,
+                mp: 40,
+                maxmp: 40,
+                str: 16,
+                def: 8,
+                mstr: 10,
+                mdef: 6,
+                spd: 6,
+                mv: 2,
+                range: 1
+            };
+            
+            // 創建敵人並放在 (8, 5) 位置
+            const enemy = new Character(8, 5, enemySpriteImage, enemyStats, true);
+            enemy.isLoaded = true;
+            
+            this.characters = [player, enemy];
             
             console.log('角色初始化完成');
+            console.log('主角屬性:', player.getStatusInfo());
+            console.log('敵人屬性:', enemy.getStatusInfo());
             this.redrawBattleScene();
             
         } catch (error) {
@@ -203,12 +358,16 @@ class GameManager {
     initializeBattlePage() {
         this.battleCanvas = document.getElementById('battleCanvas');
         this.battleContainer = document.getElementById('battleContainer');
+        this.cancelButton = document.getElementById('cancelButton');
         this.battleCtx = this.battleCanvas.getContext('2d');
         
         // 重置拖曳狀態
         this.isDragging = false;
         this.battleOffsetX = 0;
         this.battleOffsetY = 0;
+        
+        // 重置縮放狀態
+        this.zoomLevel = 1.0;
         
         // 設置canvas大小
         const canvasWidth = GAME_CONFIG.GRID_COLS * GAME_CONFIG.CELL_SIZE;
@@ -264,6 +423,226 @@ class GameManager {
         console.log(`繪製戰鬥網格: ${cols} x ${rows}`);
     }
 
+    // 計算角色移動範圍
+    calculateMovementRange(character) {
+        const range = [];
+        const mv = character.stats.mv;
+        const startX = character.gridX;
+        const startY = character.gridY;
+        
+        // 將角色當前位置也加入範圍（用於視覺顯示）
+        range.push({x: startX, y: startY, distance: 0});
+        
+        // 使用廣度優先搜索計算移動範圍
+        const queue = [{x: startX, y: startY, distance: 0}];
+        const visited = new Set();
+        visited.add(`${startX},${startY}`);
+        
+        while (queue.length > 0) {
+            const current = queue.shift();
+            
+            // 如果距離小於等於移動力且大於0，加入可移動範圍
+            if (current.distance > 0 && current.distance <= mv) {
+                range.push({x: current.x, y: current.y, distance: current.distance});
+            }
+            
+            // 只有在當前距離小於移動力時才繼續擴展
+            if (current.distance < mv) {
+                // 檢查四個方向
+                const directions = [
+                    {dx: 0, dy: -1}, // 上
+                    {dx: 0, dy: 1},  // 下
+                    {dx: -1, dy: 0}, // 左
+                    {dx: 1, dy: 0}   // 右
+                ];
+                
+                directions.forEach(dir => {
+                    const newX = current.x + dir.dx;
+                    const newY = current.y + dir.dy;
+                    const key = `${newX},${newY}`;
+                    
+                    // 檢查邊界和是否已訪問
+                    if (newX >= 0 && newX < GAME_CONFIG.GRID_COLS && 
+                        newY >= 0 && newY < GAME_CONFIG.GRID_ROWS && 
+                        !visited.has(key)) {
+                        
+                        // 檢查是否有其他角色阻擋
+                        const isBlocked = this.characters.some(char => 
+                            char !== character && char.gridX === newX && char.gridY === newY
+                        );
+                        
+                        if (!isBlocked) {
+                            visited.add(key);
+                            queue.push({x: newX, y: newY, distance: current.distance + 1});
+                        }
+                    }
+                });
+            }
+        }
+        
+        return range;
+    }
+
+    // 計算攻擊範圍
+    calculateAttackRange(character) {
+        const range = [];
+        const attackRange = character.stats.range;
+        const startX = character.gridX;
+        const startY = character.gridY;
+        
+        // 使用廣度優先搜索計算攻擊範圍
+        const queue = [{x: startX, y: startY, distance: 0}];
+        const visited = new Set();
+        visited.add(`${startX},${startY}`);
+        
+        while (queue.length > 0) {
+            const current = queue.shift();
+            
+            // 如果距離小於等於攻擊範圍且大於0，加入攻擊範圍
+            if (current.distance > 0 && current.distance <= attackRange) {
+                range.push({x: current.x, y: current.y, distance: current.distance});
+            }
+            
+            // 只有在當前距離小於攻擊範圍時才繼續擴展
+            if (current.distance < attackRange) {
+                // 檢查四個方向
+                const directions = [
+                    {dx: 0, dy: -1}, // 上
+                    {dx: 0, dy: 1},  // 下
+                    {dx: -1, dy: 0}, // 左
+                    {dx: 1, dy: 0}   // 右
+                ];
+                
+                directions.forEach(dir => {
+                    const newX = current.x + dir.dx;
+                    const newY = current.y + dir.dy;
+                    const key = `${newX},${newY}`;
+                    
+                    // 檢查邊界和是否已訪問
+                    if (newX >= 0 && newX < GAME_CONFIG.GRID_COLS && 
+                        newY >= 0 && newY < GAME_CONFIG.GRID_ROWS && 
+                        !visited.has(key)) {
+                        
+                        visited.add(key);
+                        queue.push({x: newX, y: newY, distance: current.distance + 1});
+                    }
+                });
+            }
+        }
+        
+        return range;
+    }
+
+    // 繪製移動範圍
+    drawMovementRange() {
+        if (!this.battleCtx || this.movementRange.length === 0) return;
+        
+        const ctx = this.battleCtx;
+        ctx.save();
+        
+        // 設置半透明黃色
+        ctx.fillStyle = 'rgba(255, 255, 0, 0.4)';
+        
+        this.movementRange.forEach(cell => {
+            const x = cell.x * GAME_CONFIG.CELL_SIZE;
+            const y = cell.y * GAME_CONFIG.CELL_SIZE;
+            ctx.fillRect(x, y, GAME_CONFIG.CELL_SIZE, GAME_CONFIG.CELL_SIZE);
+        });
+        
+        ctx.restore();
+    }
+
+    // 繪製攻擊範圍
+    drawAttackRange() {
+        if (!this.battleCtx || this.attackRange.length === 0) return;
+        
+        const ctx = this.battleCtx;
+        ctx.save();
+        
+        // 設置半透明紅色
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.4)';
+        
+        this.attackRange.forEach(cell => {
+            const x = cell.x * GAME_CONFIG.CELL_SIZE;
+            const y = cell.y * GAME_CONFIG.CELL_SIZE;
+            ctx.fillRect(x, y, GAME_CONFIG.CELL_SIZE, GAME_CONFIG.CELL_SIZE);
+        });
+        
+        ctx.restore();
+    }
+
+    // 選擇角色
+    selectCharacter(character) {
+        // 只允許選擇我方角色
+        if (character.isEnemy) {
+            console.log('無法選擇敵人');
+            return;
+        }
+        
+        this.selectedCharacter = character;
+        this.movementRange = this.calculateMovementRange(character);
+        this.gameState = 'moving';
+        this.showCancelButton();
+        console.log(`選擇角色，移動範圍: ${this.movementRange.length} 格`);
+        this.redrawBattleScene();
+    }
+
+    // 進入攻擊模式
+    enterAttackMode(character) {
+        this.selectedCharacter = character;
+        this.attackRange = this.calculateAttackRange(character);
+        this.movementRange = []; // 清除移動範圍
+        this.gameState = 'attacking';
+        console.log(`進入攻擊模式，攻擊範圍: ${this.attackRange.length} 格`);
+        this.redrawBattleScene();
+    }
+
+    // 顯示取消按鈕
+    showCancelButton() {
+        if (this.cancelButton) {
+            this.cancelButton.style.display = 'block';
+        }
+    }
+
+    // 隱藏取消按鈕
+    hideCancelButton() {
+        if (this.cancelButton) {
+            this.cancelButton.style.display = 'none';
+        }
+    }
+
+    // 取消動作
+    cancelAction() {
+        this.deselectCharacter();
+    }
+
+    // 執行攻擊
+    performAttack(attacker, target) {
+        const damage = Math.max(1, attacker.stats.str - target.stats.def);
+        const isDead = target.takeDamage(damage);
+        
+        console.log(`${attacker.isEnemy ? '敵人' : '我方'}攻擊${target.isEnemy ? '敵人' : '我方'}!`);
+        console.log(`造成 ${damage} 點傷害`);
+        console.log(`目標剩餘HP: ${target.stats.hp}/${target.stats.maxhp}`);
+        
+        if (isDead) {
+            console.log(`${target.isEnemy ? '敵人' : '我方'}被擊敗!`);
+        }
+        
+        // 攻擊後回到普通狀態
+        this.deselectCharacter();
+    }
+
+    // 取消選擇角色
+    deselectCharacter() {
+        this.selectedCharacter = null;
+        this.movementRange = [];
+        this.attackRange = [];
+        this.gameState = 'normal';
+        this.hideCancelButton();
+        this.redrawBattleScene();
+    }
+
     // 重繪整個戰鬥場景
     redrawBattleScene() {
         if (!this.battleCtx) return;
@@ -274,18 +653,25 @@ class GameManager {
         // 重繪網格
         this.drawBattleGrid();
         
+        // 繪製移動範圍
+        this.drawMovementRange();
+        
+        // 繪製攻擊範圍
+        this.drawAttackRange();
+        
         // 繪製所有角色
         this.characters.forEach(character => {
             character.draw(this.battleCtx);
         });
     }
 
-    // 更新戰鬥畫面位置
+    // 更新戰鬥畫面位置和縮放
     updateBattlePosition() {
         if (this.battleCanvas) {
             const translateX = -50 + (this.battleOffsetX / window.innerWidth) * 100;
             const translateY = -50 + (this.battleOffsetY / window.innerHeight) * 100;
-            this.battleCanvas.style.transform = `translate(${translateX}%, ${translateY}%)`;
+            const scale = this.zoomLevel;
+            this.battleCanvas.style.transform = `translate(${translateX}%, ${translateY}%) scale(${scale})`;
         }
     }
 
@@ -369,17 +755,110 @@ class GameManager {
         }
     }
 
+    handleBattleWheel(e) {
+        if (this.battleContainer && (e.target === this.battleContainer || e.target === this.battleCanvas)) {
+            e.preventDefault();
+            
+            // 計算縮放變化
+            const delta = e.deltaY > 0 ? -this.zoomStep : this.zoomStep;
+            const newZoom = this.zoomLevel + delta;
+            
+            // 限制縮放範圍
+            this.zoomLevel = Math.max(this.minZoom, Math.min(this.maxZoom, newZoom));
+            
+            // 獲取滑鼠相對於畫布的位置
+            const rect = this.battleCanvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left - rect.width / 2;
+            const mouseY = e.clientY - rect.top - rect.height / 2;
+            
+            // 根據縮放調整偏移，讓縮放以滑鼠位置為中心
+            const zoomFactor = delta / this.zoomStep;
+            this.battleOffsetX -= mouseX * zoomFactor * 0.1;
+            this.battleOffsetY -= mouseY * zoomFactor * 0.1;
+            
+            this.updateBattlePosition();
+            
+            console.log(`縮放等級: ${this.zoomLevel.toFixed(2)}x`);
+        }
+    }
+
     handleBattleClick(e) {
         // 只有在沒有拖曳的情況下才處理點擊
         if (!this.isDragging && this.battleCanvas && e.target === this.battleCanvas) {
             const rect = this.battleCanvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const x = (e.clientX - rect.left) / this.zoomLevel;
+            const y = (e.clientY - rect.top) / this.zoomLevel;
             
             const gridX = Math.floor(x / GAME_CONFIG.CELL_SIZE);
             const gridY = Math.floor(y / GAME_CONFIG.CELL_SIZE);
             
-            console.log(`點擊網格位置: (${gridX}, ${gridY})`);
+            // 檢查座標是否在有效範圍內
+            if (gridX >= 0 && gridX < GAME_CONFIG.GRID_COLS && 
+                gridY >= 0 && gridY < GAME_CONFIG.GRID_ROWS) {
+                
+                console.log(`點擊網格位置: (${gridX}, ${gridY})`);
+                
+                // 檢查是否點擊到角色
+                const clickedCharacter = this.characters.find(char => 
+                    char.gridX === gridX && char.gridY === gridY
+                );
+                
+                if (clickedCharacter) {
+                    console.log('點擊到角色!');
+                    console.log('角色屬性:', clickedCharacter.getStatusInfo());
+                    
+                    if (this.gameState === 'moving') {
+                        // 移動模式下，如果點擊的是已選擇的角色，進入攻擊模式
+                        if (this.selectedCharacter === clickedCharacter) {
+                            this.enterAttackMode(clickedCharacter);
+                        } else {
+                            // 選擇新角色
+                            this.selectCharacter(clickedCharacter);
+                        }
+                    } else if (this.gameState === 'attacking') {
+                        // 攻擊模式下，檢查是否點擊敵人並在攻擊範圍內
+                        if (clickedCharacter.isEnemy) {
+                            const inAttackRange = this.attackRange.some(cell => 
+                                cell.x === gridX && cell.y === gridY
+                            );
+                            
+                            if (inAttackRange) {
+                                this.performAttack(this.selectedCharacter, clickedCharacter);
+                            } else {
+                                console.log('目標不在攻擊範圍內');
+                            }
+                        } else {
+                            console.log('無法攻擊我方角色');
+                        }
+                    } else {
+                        // 普通模式下選擇角色
+                        this.selectCharacter(clickedCharacter);
+                    }
+                } else {
+                    // 點擊空格
+                    if (this.selectedCharacter && this.gameState === 'moving') {
+                        // 檢查是否點擊在移動範圍內
+                        const inRange = this.movementRange.some(cell => 
+                            cell.x === gridX && cell.y === gridY
+                        );
+                        
+                        if (inRange) {
+                            console.log(`移動角色到 (${gridX}, ${gridY})`);
+                            // 移動角色
+                            this.selectedCharacter.gridX = gridX;
+                            this.selectedCharacter.gridY = gridY;
+                            // 移動後進入攻擊模式
+                            this.enterAttackMode(this.selectedCharacter);
+                        } else {
+                            // 點擊範圍外，取消選擇
+                            this.deselectCharacter();
+                        }
+                    } else {
+                        // 其他情況取消選擇
+                        this.deselectCharacter();
+                    }
+                }
+            }
         }
     }
 }

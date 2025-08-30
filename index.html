@@ -155,6 +155,24 @@
         .back-button:hover {
             background: rgba(255,255,255,0.3);
         }
+
+        .cancel-button {
+            position: absolute;
+            top: 20px;
+            left: 120px;
+            background: rgba(255,100,100,0.8);
+            border: 2px solid white;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .cancel-button:hover {
+            background: rgba(255,100,100,1);
+        }
     </style>
 </head>
 <body>
@@ -177,6 +195,7 @@
     <!-- 戰鬥頁面 -->
     <div id="battlePage" class="page">
         <button class="back-button" onclick="gameManager.switchPage('mainMenu')">← 返回</button>
+        <button id="cancelButton" class="cancel-button" onclick="gameManager.cancelAction()" style="display: none;">取消</button>
         <div class="battle-container" id="battleContainer">
             <canvas id="battleCanvas" class="battle-grid"></canvas>
         </div>
