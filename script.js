@@ -6,7 +6,72 @@ const GAME_CONFIG = {
     GRID_COLS: 12,  // 網格列數
     GRID_ROWS: 8,   // 網格行數
     CELL_SIZE: 200,  // 每個格子的大小(像素) - 放大4倍 (50 * 4 = 200)
+    
+    // 角色配置
+    CHAR_SPRITE_X: 20,  // 角色圖片中的 X 座標
+    CHAR_SPRITE_Y: 0,   // 角色圖片中的 Y 座標
+    CHAR_SPRITE_W: 20,  // 角色圖片寬度 (39-20+1)
+    CHAR_SPRITE_H: 32,  // 角色圖片高度 (31-0+1)
 };
+
+// 角色類別
+class Character {
+    constructor(gridX, gridY, spriteImage) {
+        this.gridX = gridX;      // 網格座標 X
+        this.gridY = gridY;      // 網格座標 Y
+        this.spriteImage = spriteImage;  // 角色圖片
+        this.isLoaded = false;   // 圖片是否載入完成
+    }
+    
+    // 繪製角色
+    draw(ctx, offsetX = 0, offsetY = 0) {
+        if (!this.isLoaded || !this.spriteImage) return;
+        
+        // 設置像素完美渲染
+        ctx.imageSmoothingEnabled = false;
+        
+        // 計算格子的基礎位置
+        const cellX = this.gridX * GAME_CONFIG.CELL_SIZE + offsetX;
+        const cellY = this.gridY * GAME_CONFIG.CELL_SIZE + offsetY;
+        
+        // 計算角色圖片的原始比例
+        const spriteAspectRatio = GAME_CONFIG.CHAR_SPRITE_W / GAME_CONFIG.CHAR_SPRITE_H;
+        
+        // 設定角色大小為格子的80%，並保持比例
+        const maxSize = GAME_CONFIG.CELL_SIZE * 0.8;
+        let charWidth, charHeight;
+        
+        if (spriteAspectRatio > 1) {
+            // 寬度較大，以寬度為準
+            charWidth = maxSize;
+            charHeight = maxSize / spriteAspectRatio;
+        } else {
+            // 高度較大，以高度為準
+            charHeight = maxSize;
+            charWidth = maxSize * spriteAspectRatio;
+        }
+        
+        // 計算置中位置
+        const charX = cellX + (GAME_CONFIG.CELL_SIZE - charWidth) / 2;
+        const charY = cellY + (GAME_CONFIG.CELL_SIZE - charHeight) / 2;
+        
+        // 從原圖中擷取指定區域並繪製到置中位置
+        ctx.drawImage(
+            this.spriteImage,
+            GAME_CONFIG.CHAR_SPRITE_X,     // 源圖 X
+            GAME_CONFIG.CHAR_SPRITE_Y,     // 源圖 Y
+            GAME_CONFIG.CHAR_SPRITE_W,     // 源圖寬度
+            GAME_CONFIG.CHAR_SPRITE_H,     // 源圖高度
+            charX,                         // 目標 X (置中)
+            charY,                         // 目標 Y (置中)
+            charWidth,                     // 目標寬度 (保持比例)
+            charHeight                     // 目標高度 (保持比例)
+        );
+        
+        // 恢復默認設置
+        ctx.imageSmoothingEnabled = true;
+    }
+}
 
 // 遊戲管理器
 class GameManager {
@@ -24,6 +89,10 @@ class GameManager {
         this.battleOffsetX = 0;
         this.battleOffsetY = 0;
         this.battleContainer = null;
+        
+        // 角色系統
+        this.characters = [];
+        this.characterSprites = {};
         
         this.initializeEventHandlers();
     }
@@ -94,6 +163,42 @@ class GameManager {
         }
     }
 
+    // 載入角色圖片
+    loadCharacterSprite(filename) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                this.characterSprites[filename] = img;
+                resolve(img);
+            };
+            img.onerror = (error) => {
+                console.error(`無法載入角色圖片: ${filename}`, error);
+                reject(error);
+            };
+            img.src = `chara/${filename}`;
+        });
+    }
+
+    // 初始化角色
+    async initializeCharacters() {
+        try {
+            // 載入角色圖片
+            const spriteImage = await this.loadCharacterSprite('000.png');
+            
+            // 創建角色並放在 (6, 4) 位置
+            const character = new Character(6, 4, spriteImage);
+            character.isLoaded = true;
+            
+            this.characters = [character];
+            
+            console.log('角色初始化完成');
+            this.redrawBattleScene();
+            
+        } catch (error) {
+            console.error('角色初始化失敗:', error);
+        }
+    }
+
     // 初始化戰鬥頁面
     initializeBattlePage() {
         this.battleCanvas = document.getElementById('battleCanvas');
@@ -117,6 +222,9 @@ class GameManager {
         
         // 繪製戰鬥網格
         this.drawBattleGrid();
+        
+        // 初始化角色
+        this.initializeCharacters();
     }
 
     // 繪製戰鬥網格
@@ -154,6 +262,22 @@ class GameManager {
         }
         
         console.log(`繪製戰鬥網格: ${cols} x ${rows}`);
+    }
+
+    // 重繪整個戰鬥場景
+    redrawBattleScene() {
+        if (!this.battleCtx) return;
+        
+        // 清空畫布
+        this.battleCtx.clearRect(0, 0, this.battleCanvas.width, this.battleCanvas.height);
+        
+        // 重繪網格
+        this.drawBattleGrid();
+        
+        // 繪製所有角色
+        this.characters.forEach(character => {
+            character.draw(this.battleCtx);
+        });
     }
 
     // 更新戰鬥畫面位置
