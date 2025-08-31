@@ -177,6 +177,95 @@ class Character {
     }
 }
 
+// 傷害數字類
+class DamageNumber {
+    constructor(damage, gridX, gridY, onComplete = null) {
+        this.damage = damage;
+        this.gridX = gridX;
+        this.gridY = gridY;
+        this.offsetX = 0;
+        this.offsetY = 0;
+        this.opacity = 1.0;
+        this.scale = 1.0;
+        this.lifetime = 0; // 生存時間（毫秒）
+        this.maxLifetime = 2000; // 最大生存時間（2秒）
+        this.startTime = Date.now();
+        this.onComplete = onComplete; // 完成回調
+        this.hasCompletedCallback = false; // 是否已經調用過回調
+    }
+    
+    // 更新傷害數字的位置和透明度
+    update() {
+        this.lifetime = Date.now() - this.startTime;
+        const progress = this.lifetime / this.maxLifetime;
+        
+        // 在動畫播到一半（50%）時調用回調
+        if (progress >= 0.5 && this.onComplete && !this.hasCompletedCallback) {
+            this.hasCompletedCallback = true;
+            console.log('傷害數字動畫播到一半，調用完成回調');
+            this.onComplete();
+        }
+        
+        if (progress >= 1.0) {
+            return false; // 標記為需要移除
+        }
+        
+        // 向上漂浮效果
+        this.offsetY = -progress * 60; // 向上移動60像素
+        this.offsetX = Math.sin(progress * Math.PI * 2) * 10; // 輕微左右搖擺
+        
+        // 透明度漸變
+        if (progress < 0.7) {
+            this.opacity = 1.0;
+        } else {
+            this.opacity = 1.0 - (progress - 0.7) / 0.3; // 最後30%時間淡出
+        }
+        
+        // 縮放效果
+        if (progress < 0.2) {
+            this.scale = 1.0 + (1.0 - progress / 0.2) * 0.5; // 開始時稍微放大
+        } else {
+            this.scale = 1.0;
+        }
+        
+        return true; // 繼續存在
+    }
+    
+    // 繪製傷害數字
+    draw(ctx) {
+        const cellSize = GAME_CONFIG.CELL_SIZE;
+        const x = this.gridX * cellSize + cellSize * 0.8 + this.offsetX; // 右上角位置
+        const y = this.gridY * cellSize + cellSize * 0.2 + this.offsetY;
+        
+        ctx.save();
+        
+        // 設置透明度和縮放
+        ctx.globalAlpha = this.opacity;
+        ctx.translate(x, y);
+        ctx.scale(this.scale, this.scale);
+        
+        // 設置文字樣式
+        ctx.font = 'bold 24px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        // 繪製文字陰影
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillText(`-${this.damage}`, 2, 2);
+        
+        // 繪製主要文字
+        ctx.fillStyle = '#ff4444'; // 紅色傷害數字
+        ctx.fillText(`-${this.damage}`, 0, 0);
+        
+        // 繪製文字邊框
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2;
+        ctx.strokeText(`-${this.damage}`, 0, 0);
+        
+        ctx.restore();
+    }
+}
+
 // 遊戲管理器
 class GameManager {
     constructor() {
@@ -221,6 +310,9 @@ class GameManager {
         // 行動菜單系統
         this.actionMenu = null;
         this.originalPosition = null; // 記錄移動前的位置
+        
+        // 傷害顯示系統
+        this.damageNumbers = []; // 存儲所有的傷害數字
         
         this.initializeEventHandlers();
     }
@@ -1010,12 +1102,19 @@ class GameManager {
         console.log(`造成 ${damage} 點傷害`);
         console.log(`目標剩餘HP: ${target.stats.hp}/${target.stats.maxhp}`);
         
+        // 顯示傷害數字，並在動畫完成後繼續行動
+        this.addDamageNumber(damage, target.gridX, target.gridY, () => {
+            // 傷害動畫完成後的回調
+            console.log('傷害動畫完成，繼續下一個角色行動');
+            this.completeCharacterAction(attacker);
+        });
+        
         if (isDead) {
             console.log(`${target.isEnemy ? '敵人' : '我方'}被擊敗!`);
         }
         
-        // 攻擊後完成行動
-        this.completeCharacterAction(attacker);
+        console.log('等待傷害動畫完成...');
+        // 注意：不在這裡直接調用 completeCharacterAction，改為在動畫完成後調用
     }
     
     // 結束回合
@@ -1225,6 +1324,9 @@ class GameManager {
         this.characters.forEach(character => {
             character.draw(this.battleCtx);
         });
+        
+        // 繪製傷害數字（在角色上方）
+        this.drawDamageNumbers();
     }
     
     // 繪製當前行動角色的指示器
@@ -1267,6 +1369,44 @@ class GameManager {
         ctx.stroke();
         
         ctx.restore();
+    }
+    
+    // 添加傷害數字
+    addDamageNumber(damage, gridX, gridY, onComplete = null) {
+        const damageNumber = new DamageNumber(damage, gridX, gridY, onComplete);
+        this.damageNumbers.push(damageNumber);
+        
+        // 開始動畫循環（如果還沒開始）
+        if (this.damageNumbers.length === 1) {
+            this.startDamageAnimation();
+        }
+    }
+    
+    // 開始傷害數字動畫
+    startDamageAnimation() {
+        const animate = () => {
+            // 更新所有傷害數字
+            this.damageNumbers = this.damageNumbers.filter(damageNumber => damageNumber.update());
+            
+            // 重繪場景
+            this.redrawBattleScene();
+            
+            // 如果還有傷害數字，繼續動畫
+            if (this.damageNumbers.length > 0) {
+                requestAnimationFrame(animate);
+            }
+        };
+        
+        requestAnimationFrame(animate);
+    }
+    
+    // 繪製所有傷害數字
+    drawDamageNumbers() {
+        if (!this.battleCtx || this.damageNumbers.length === 0) return;
+        
+        this.damageNumbers.forEach(damageNumber => {
+            damageNumber.draw(this.battleCtx);
+        });
     }
 
     // 更新戰鬥畫面位置和縮放
