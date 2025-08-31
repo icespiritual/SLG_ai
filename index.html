@@ -141,7 +141,7 @@
         .back-button {
             position: absolute;
             top: 20px;
-            left: 20px;
+            right: 20px;
             background: rgba(255,255,255,0.2);
             border: 2px solid white;
             color: white;
@@ -155,6 +155,69 @@
 
         .back-button:hover {
             background: rgba(255,255,255,0.3);
+        }
+
+        /* 行動佇列顯示 */
+        .action-queue {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 80px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid #fff;
+            border-radius: 10px;
+            padding: 10px 5px;
+            z-index: 1000;
+        }
+
+        .action-queue-title {
+            color: white;
+            text-align: center;
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #fff;
+            padding-bottom: 4px;
+        }
+
+        .queue-character {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            padding: 4px;
+            border-radius: 5px;
+            position: relative;
+        }
+
+        .queue-character.current {
+            background: rgba(255, 215, 0, 0.3);
+            border: 1px solid gold;
+        }
+
+        .queue-character-icon {
+            width: 32px;
+            height: 32px;
+            border: 1px solid #fff;
+            border-radius: 3px;
+            margin-right: 8px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .queue-character-sprite {
+            width: 100%;
+            height: 100%;
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+        }
+
+        .queue-wait-time {
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+            flex: 1;
+            text-align: center;
         }
 
         /* 角色行動菜單 */
@@ -219,6 +282,13 @@
     <!-- 戰鬥頁面 -->
     <div id="battlePage" class="page">
         <button class="back-button" onclick="gameManager.switchPage('mainMenu')">← 返回</button>
+        
+        <!-- 行動佇列顯示 -->
+        <div id="actionQueue" class="action-queue">
+            <div class="action-queue-title">行動順序</div>
+            <div id="queueList"></div>
+        </div>
+        
         <div class="battle-container" id="battleContainer">
             <canvas id="battleCanvas" class="battle-grid"></canvas>
             <div id="actionMenu" class="action-menu"></div>

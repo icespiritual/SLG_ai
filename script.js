@@ -37,6 +37,10 @@ class Character {
             mv: stats.mv || 3,             // 移動力
             range: stats.range || 1        // 攻擊射程
         };
+        
+        // 速度制系統相關
+        this.waitTime = 0;              // 等待時間
+        this.hasActed = false;          // 本輪是否已行動
     }
     
     // 取得角色狀態資訊
@@ -208,8 +212,10 @@ class GameManager {
         this.attackRange = [];
         this.gameState = 'normal'; // 'normal', 'moving', 'attacking'
         
-        // 回合制系統
-        this.currentTurn = 'player'; // 'player', 'enemy'
+        // 速度制行動系統
+        this.SPEED_BASE = 10000; // 速度基準值
+        this.actionQueue = []; // 行動順序佇列
+        this.currentActingCharacter = null; // 當前行動的角色
         this.turnIndicator = null;
         
         // 行動菜單系統
@@ -318,7 +324,7 @@ class GameManager {
                 def: 12,
                 mstr: 14,
                 mdef: 10,
-                spd: 7,
+                spd: 100,
                 mv: 3,
                 range: 1
             };
@@ -326,6 +332,28 @@ class GameManager {
             // 創建主角並放在 (6, 4) 位置
             const player = new Character(6, 4, playerSpriteImage, playerStats, false);
             player.isLoaded = true;
+            
+            // 載入第二個我方角色圖片
+            const ally1SpriteImage = await this.loadCharacterSprite('001.png', 'chara');
+            
+            // 設定第二個我方角色屬性（與主角相同，但速度是90）
+            const ally1Stats = {
+                hp: 120,
+                maxhp: 120,
+                mp: 60,
+                maxmp: 60,
+                str: 28,
+                def: 12,
+                mstr: 14,
+                mdef: 10,
+                spd: 90,
+                mv: 3,
+                range: 1
+            };
+            
+            // 創建第二個我方角色並放在 (5, 4) 位置
+            const ally1 = new Character(5, 4, ally1SpriteImage, ally1Stats, false);
+            ally1.isLoaded = true;
             
             // 載入敵人圖片
             const enemySpriteImage = await this.loadCharacterSprite('000.png', 'enemy');
@@ -340,7 +368,7 @@ class GameManager {
                 def: 8,
                 mstr: 10,
                 mdef: 6,
-                spd: 6,
+                spd: 80,
                 mv: 2,
                 range: 1
             };
@@ -349,16 +377,241 @@ class GameManager {
             const enemy = new Character(8, 5, enemySpriteImage, enemyStats, true);
             enemy.isLoaded = true;
             
-            this.characters = [player, enemy];
+            this.characters = [player, ally1, enemy];
             
             console.log('角色初始化完成');
             console.log('主角屬性:', player.getStatusInfo());
+            console.log('我方角色2屬性:', ally1.getStatusInfo());
             console.log('敵人屬性:', enemy.getStatusInfo());
+            
+            // 初始化速度制行動系統
+            this.initializeActionQueue();
+            
             this.redrawBattleScene();
             
         } catch (error) {
             console.error('角色初始化失敗:', error);
         }
+    }
+    
+    // 初始化行動佇列
+    initializeActionQueue() {
+        this.actionQueue = [];
+        
+        // 為所有角色計算初始等待時間並加入佇列
+        this.characters.forEach(character => {
+            if (character.isAlive()) {
+                character.waitTime = this.SPEED_BASE / character.stats.spd;
+                character.hasActed = false;
+                this.actionQueue.push(character);
+            }
+        });
+        
+        console.log('初始化行動佇列:');
+        this.actionQueue.forEach((char, index) => {
+            console.log(`${index + 1}. ${char.isEnemy ? '敵人' : '主角'} - 等待時間: ${char.waitTime.toFixed(2)}`);
+        });
+        
+        // 更新佇列顯示
+        this.updateActionQueueDisplay();
+        
+        // 開始第一個角色的回合
+        this.nextCharacterTurn();
+    }
+    
+    // 排序行動佇列
+    sortActionQueue() {
+        this.actionQueue.sort((a, b) => a.waitTime - b.waitTime);
+    }
+    
+    // 下一個角色的回合
+    nextCharacterTurn() {
+        if (this.actionQueue.length === 0) {
+            console.log('沒有角色可以行動');
+            return;
+        }
+        
+        // 推進時間直到有角色可以行動
+        this.advanceTime();
+        
+        // 找到等待時間為0或最小的角色
+        this.actionQueue.sort((a, b) => a.waitTime - b.waitTime);
+        this.currentActingCharacter = this.actionQueue[0];
+        
+        // 如果最小等待時間還大於0，表示需要繼續等待
+        if (this.currentActingCharacter.waitTime > 0) {
+            console.log('所有角色都還在等待中，繼續推進時間...');
+            setTimeout(() => this.nextCharacterTurn(), 100);
+            return;
+        }
+        
+        this.currentActingCharacter.hasActed = false;
+        
+        console.log(`輪到 ${this.currentActingCharacter.isEnemy ? '敵人' : '主角'} 行動`);
+        console.log(`當前等待時間: ${this.currentActingCharacter.waitTime.toFixed(2)}`);
+        console.log(`當前行動佇列長度: ${this.actionQueue.length}`);
+        
+        // 更新佇列顯示
+        this.updateActionQueueDisplay();
+        
+        // 將鏡頭移動到當前行動角色
+        this.centerCameraOnCharacter(this.currentActingCharacter);
+        
+        // 如果是AI角色，自動執行AI
+        if (this.currentActingCharacter.isEnemy) {
+            console.log('準備執行敵人AI...');
+            setTimeout(() => {
+                console.log('開始執行敵人AI');
+                this.executeEnemyAI(this.currentActingCharacter, 
+                    this.characters.filter(char => !char.isEnemy && char.isAlive()));
+            }, 1000);
+        } else {
+            // 玩家角色，自動選擇並顯示菜單
+            console.log('玩家角色行動，自動顯示行動菜單...');
+            setTimeout(() => {
+                this.selectedCharacter = this.currentActingCharacter;
+                this.showActionMenu(this.currentActingCharacter);
+                this.redrawBattleScene();
+            }, 500); // 等待鏡頭移動完成後顯示菜單
+        }
+    }
+    
+    // 將鏡頭移動到指定角色
+    centerCameraOnCharacter(character) {
+        if (!character || !this.battleCanvas) return;
+        
+        // 計算角色在畫布上的像素位置（角色中心）
+        const characterPixelX = character.gridX * GAME_CONFIG.CELL_SIZE + GAME_CONFIG.CELL_SIZE / 2;
+        const characterPixelY = character.gridY * GAME_CONFIG.CELL_SIZE + GAME_CONFIG.CELL_SIZE / 2;
+        
+        // 計算畫布尺寸
+        const canvasWidth = GAME_CONFIG.GRID_COLS * GAME_CONFIG.CELL_SIZE;
+        const canvasHeight = GAME_CONFIG.GRID_ROWS * GAME_CONFIG.CELL_SIZE;
+        
+        // 計算畫布中心點
+        const canvasCenterX = canvasWidth / 2;
+        const canvasCenterY = canvasHeight / 2;
+        
+        // 計算角色相對於畫布中心的偏移
+        const offsetFromCanvasCenterX = characterPixelX - canvasCenterX;
+        const offsetFromCanvasCenterY = characterPixelY - canvasCenterY;
+        
+        // 由於CSS已經將畫布置中，我們只需要反向移動這個偏移
+        // 再乘以縮放因子
+        this.battleOffsetX = -offsetFromCanvasCenterX * this.zoomLevel;
+        this.battleOffsetY = -offsetFromCanvasCenterY * this.zoomLevel;
+        
+        // 更新畫面位置
+        this.updateBattlePosition();
+        
+        console.log(`鏡頭移動到角色位置: (${character.gridX}, ${character.gridY})`);
+        console.log(`角色像素位置: (${characterPixelX}, ${characterPixelY})`);
+        console.log(`畫布中心: (${canvasCenterX}, ${canvasCenterY})`);
+        console.log(`相對偏移: (${offsetFromCanvasCenterX}, ${offsetFromCanvasCenterY})`);
+        console.log(`最終偏移量: (${this.battleOffsetX}, ${this.battleOffsetY})`);
+    }
+    
+    // 推進時間系統
+    advanceTime() {
+        // 找到最小的等待時間
+        const minWaitTime = Math.min(...this.actionQueue.map(char => char.waitTime));
+        
+        console.log(`推進時間: ${minWaitTime.toFixed(2)}`);
+        
+        // 所有角色的等待時間都減去最小值
+        this.actionQueue.forEach(char => {
+            char.waitTime -= minWaitTime;
+            console.log(`${char.isEnemy ? '敵人' : '主角'} 等待時間: ${char.waitTime.toFixed(2)}`);
+        });
+        
+        // 更新佇列顯示
+        this.updateActionQueueDisplay();
+    }
+    
+    // 角色完成行動
+    completeCharacterAction(character) {
+        console.log('=== completeCharacterAction 開始 ===');
+        console.log(`角色: ${character.isEnemy ? '敵人' : '主角'}`);
+        
+        // 重新計算等待時間（角色行動後需要等待下一次行動）
+        character.waitTime = this.SPEED_BASE / character.stats.spd;
+        character.hasActed = true;
+        
+        console.log(`重新計算等待時間: ${character.waitTime.toFixed(2)}`);
+        console.log(`${character.isEnemy ? '敵人' : '主角'} 完成行動，等待時間重置`);
+        
+        // 清理選擇狀態
+        this.deselectCharacter();
+        
+        // 更新佇列顯示
+        this.updateActionQueueDisplay();
+        
+        // 繼續下一個角色的回合
+        console.log('準備呼叫 nextCharacterTurn...');
+        this.nextCharacterTurn();
+    }
+    
+    // 更新行動佇列顯示
+    updateActionQueueDisplay() {
+        if (!this.queueList) return;
+        
+        // 清空現有顯示
+        this.queueList.innerHTML = '';
+        
+        // 建立一個暫時的佇列副本並按等待時間排序
+        const sortedQueue = [...this.actionQueue].sort((a, b) => a.waitTime - b.waitTime);
+        
+        sortedQueue.forEach((character, index) => {
+            const queueItem = document.createElement('div');
+            queueItem.className = 'queue-character';
+            
+            // 如果是當前行動角色，添加高亮樣式
+            if (character === this.currentActingCharacter) {
+                queueItem.classList.add('current');
+            }
+            
+            // 創建角色圖示容器
+            const iconContainer = document.createElement('div');
+            iconContainer.className = 'queue-character-icon';
+            
+            // 創建角色圖示的canvas
+            if (character.spriteImage) {
+                const iconCanvas = document.createElement('canvas');
+                iconCanvas.width = 32;
+                iconCanvas.height = 32; // 改為正方形
+                iconCanvas.className = 'queue-character-sprite';
+                
+                const iconCtx = iconCanvas.getContext('2d');
+                iconCtx.imageSmoothingEnabled = false;
+                
+                // 從角色圖片中擷取指定區域的上半部分
+                iconCtx.drawImage(
+                    character.spriteImage,
+                    GAME_CONFIG.CHAR_SPRITE_X,     // 源圖 X
+                    GAME_CONFIG.CHAR_SPRITE_Y,     // 源圖 Y
+                    GAME_CONFIG.CHAR_SPRITE_W,     // 源圖寬度
+                    GAME_CONFIG.CHAR_SPRITE_H / 2, // 源圖高度的一半（上半部）
+                    0,                             // 目標 X
+                    0,                             // 目標 Y
+                    32,                            // 目標寬度
+                    32                             // 目標高度（正方形）
+                );
+                
+                iconContainer.appendChild(iconCanvas);
+            }
+            
+            // 創建等待時間顯示
+            const waitTimeDisplay = document.createElement('div');
+            waitTimeDisplay.className = 'queue-wait-time';
+            waitTimeDisplay.textContent = character.waitTime.toFixed(0);
+            
+            queueItem.appendChild(iconContainer);
+            queueItem.appendChild(waitTimeDisplay);
+            this.queueList.appendChild(queueItem);
+        });
+        
+        // 更新佇列後重繪戰鬥場景，以更新當前行動角色指示器
+        this.redrawBattleScene();
     }
 
     // 初始化戰鬥頁面
@@ -367,6 +620,7 @@ class GameManager {
         this.battleContainer = document.getElementById('battleContainer');
         this.actionMenu = document.getElementById('actionMenu');
         this.turnIndicator = document.getElementById('turnIndicator');
+        this.queueList = document.getElementById('queueList');
         this.battleCtx = this.battleCanvas.getContext('2d');
         
         console.log('行動菜單元素:', this.actionMenu);
@@ -587,9 +841,15 @@ class GameManager {
 
     // 選擇角色
     selectCharacter(character) {
-        // 只允許選擇我方角色，且必須是玩家回合
-        if (character.isEnemy || this.currentTurn !== 'player') {
-            console.log(character.isEnemy ? '無法選擇敵人' : '不是玩家回合');
+        // 只允許選擇當前行動的角色
+        if (character !== this.currentActingCharacter) {
+            console.log(character.isEnemy ? '無法選擇敵人' : '不是該角色的行動回合');
+            return;
+        }
+        
+        // 確保是玩家角色
+        if (character.isEnemy) {
+            console.log('無法選擇敵人');
             return;
         }
         
@@ -717,14 +977,14 @@ class GameManager {
         console.log(`${character.isEnemy ? '敵人' : '玩家'}使用技能${skillNumber}`);
         // TODO: 實現技能系統
         this.hideActionMenu();
-        this.endTurn();
+        this.completeCharacterAction(character);
     }
     
     // 待機
     standby() {
-        console.log('選擇待機，結束回合');
+        console.log('選擇待機，完成行動');
         this.hideActionMenu();
-        this.endTurn();
+        this.completeCharacterAction(this.currentActingCharacter);
     }
     
     // 取消移動
@@ -754,8 +1014,8 @@ class GameManager {
             console.log(`${target.isEnemy ? '敵人' : '我方'}被擊敗!`);
         }
         
-        // 攻擊後結束回合
-        this.endTurn();
+        // 攻擊後完成行動
+        this.completeCharacterAction(attacker);
     }
     
     // 結束回合
@@ -808,6 +1068,9 @@ class GameManager {
         console.log('=== 敵人AI開始行動 ===');
         console.log(`敵人當前位置: (${enemy.gridX}, ${enemy.gridY})`);
         console.log(`目標玩家數量: ${targets.length}`);
+        
+        // 確保鏡頭在敵人身上
+        this.centerCameraOnCharacter(enemy);
         
         // 計算移動範圍和攻擊範圍
         const moveRange = this.calculateMovementRange(enemy);
@@ -895,9 +1158,12 @@ class GameManager {
     
     // 執行敵人行動
     executeEnemyAction(enemy, action) {
+        console.log('=== executeEnemyAction 開始 ===');
+        console.log('action:', action);
+        
         if (!action) {
             console.log('敵人無法行動');
-            this.endTurn();
+            this.completeCharacterAction(enemy);
             return;
         }
         
@@ -917,8 +1183,10 @@ class GameManager {
             }, 500);
         } else {
             // 只移動的話直接結束回合
+            console.log('敵人只移動，準備結束回合...');
             setTimeout(() => {
-                this.endTurn();
+                console.log('呼叫 completeCharacterAction');
+                this.completeCharacterAction(enemy);
             }, 500);
         }
     }
@@ -950,19 +1218,70 @@ class GameManager {
         // 繪製攻擊範圍
         this.drawAttackRange();
         
+        // 繪製當前行動角色的指示器
+        this.drawCurrentActingCharacterIndicator();
+        
         // 繪製所有角色
         this.characters.forEach(character => {
             character.draw(this.battleCtx);
         });
     }
+    
+    // 繪製當前行動角色的指示器
+    drawCurrentActingCharacterIndicator() {
+        if (!this.battleCtx || !this.currentActingCharacter) return;
+        
+        const ctx = this.battleCtx;
+        const character = this.currentActingCharacter;
+        const cellSize = GAME_CONFIG.CELL_SIZE;
+        
+        ctx.save();
+        
+        // 計算格子位置
+        const x = character.gridX * cellSize;
+        const y = character.gridY * cellSize;
+        
+        // 繪製主要的淡藍色邊框
+        ctx.strokeStyle = 'rgba(100, 149, 237, 0.9)'; // 較深的藍色，90%透明度
+        ctx.lineWidth = 6; // 較粗的線條
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        
+        ctx.beginPath();
+        ctx.rect(x + 2, y + 2, cellSize - 4, cellSize - 4);
+        ctx.stroke();
+        
+        // 添加發光效果 - 外層光暈
+        ctx.strokeStyle = 'rgba(135, 206, 235, 0.5)'; // 淡藍色光暈
+        ctx.lineWidth = 10;
+        ctx.beginPath();
+        ctx.rect(x, y, cellSize, cellSize);
+        ctx.stroke();
+        
+        // 添加內層細邊框
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)'; // 白色內邊框
+        ctx.lineWidth = 2;
+        const margin = 6;
+        ctx.beginPath();
+        ctx.rect(x + margin, y + margin, cellSize - margin * 2, cellSize - margin * 2);
+        ctx.stroke();
+        
+        ctx.restore();
+    }
 
     // 更新戰鬥畫面位置和縮放
     updateBattlePosition() {
         if (this.battleCanvas) {
-            const translateX = -50 + (this.battleOffsetX / window.innerWidth) * 100;
-            const translateY = -50 + (this.battleOffsetY / window.innerHeight) * 100;
+            // 結合CSS預設的置中效果和我們的額外偏移
+            // CSS已經設定了 translate(-50%, -50%)，我們在此基礎上添加額外的像素偏移
+            const translateX = this.battleOffsetX;
+            const translateY = this.battleOffsetY;
             const scale = this.zoomLevel;
-            this.battleCanvas.style.transform = `translate(${translateX}%, ${translateY}%) scale(${scale})`;
+            
+            // 組合變換：先置中（CSS預設），再應用我們的偏移和縮放
+            this.battleCanvas.style.transform = `translate(-50%, -50%) translate(${translateX}px, ${translateY}px) scale(${scale})`;
+            
+            console.log(`更新畫面位置: translate(-50%, -50%) translate(${translateX}px, ${translateY}px) scale(${scale})`);
         }
     }
 
@@ -1099,8 +1418,12 @@ class GameManager {
                     console.log('角色屬性:', clickedCharacter.getStatusInfo());
                     
                     if (this.gameState === 'moving') {
-                        // 移動模式下，選擇新角色
-                        this.selectCharacter(clickedCharacter);
+                        // 移動模式下，如果點擊的是同一角色，取消移動
+                        if (clickedCharacter === this.selectedCharacter) {
+                            this.deselectCharacter();
+                        } else {
+                            this.selectCharacter(clickedCharacter);
+                        }
                     } else if (this.gameState === 'attacking') {
                         // 攻擊模式下，檢查是否點擊敵人並在攻擊範圍內
                         if (clickedCharacter.isEnemy) {
@@ -1117,8 +1440,10 @@ class GameManager {
                             console.log('無法攻擊我方角色');
                         }
                     } else {
-                        // 普通模式下選擇角色
-                        this.selectCharacter(clickedCharacter);
+                        // 普通模式下，只有當點擊的不是已選中的角色時才重新選擇
+                        if (clickedCharacter !== this.selectedCharacter) {
+                            this.selectCharacter(clickedCharacter);
+                        }
                     }
                 } else {
                     // 點擊空格
