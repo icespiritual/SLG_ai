@@ -207,7 +207,14 @@ class GameManager {
         // 攻擊系統
         this.attackRange = [];
         this.gameState = 'normal'; // 'normal', 'moving', 'attacking'
-        this.cancelButton = null;
+        
+        // 回合制系統
+        this.currentTurn = 'player'; // 'player', 'enemy'
+        this.turnIndicator = null;
+        
+        // 行動菜單系統
+        this.actionMenu = null;
+        this.originalPosition = null; // 記錄移動前的位置
         
         this.initializeEventHandlers();
     }
@@ -358,8 +365,11 @@ class GameManager {
     initializeBattlePage() {
         this.battleCanvas = document.getElementById('battleCanvas');
         this.battleContainer = document.getElementById('battleContainer');
-        this.cancelButton = document.getElementById('cancelButton');
+        this.actionMenu = document.getElementById('actionMenu');
+        this.turnIndicator = document.getElementById('turnIndicator');
         this.battleCtx = this.battleCanvas.getContext('2d');
+        
+        console.log('行動菜單元素:', this.actionMenu);
         
         // 重置拖曳狀態
         this.isDragging = false;
@@ -368,6 +378,10 @@ class GameManager {
         
         // 重置縮放狀態
         this.zoomLevel = 1.0;
+        
+        // 重置回合
+        this.currentTurn = 'player';
+        this.updateTurnIndicator();
         
         // 設置canvas大小
         const canvasWidth = GAME_CONFIG.GRID_COLS * GAME_CONFIG.CELL_SIZE;
@@ -573,21 +587,19 @@ class GameManager {
 
     // 選擇角色
     selectCharacter(character) {
-        // 只允許選擇我方角色
-        if (character.isEnemy) {
-            console.log('無法選擇敵人');
+        // 只允許選擇我方角色，且必須是玩家回合
+        if (character.isEnemy || this.currentTurn !== 'player') {
+            console.log(character.isEnemy ? '無法選擇敵人' : '不是玩家回合');
             return;
         }
         
         this.selectedCharacter = character;
-        this.movementRange = this.calculateMovementRange(character);
-        this.gameState = 'moving';
-        this.showCancelButton();
-        console.log(`選擇角色，移動範圍: ${this.movementRange.length} 格`);
+        this.showActionMenu(character);
+        console.log(`選擇角色位置: (${character.gridX}, ${character.gridY})`);
         this.redrawBattleScene();
     }
 
-    // 進入攻擊模式
+    // 進入攻擊模式（內部使用）
     enterAttackMode(character) {
         this.selectedCharacter = character;
         this.attackRange = this.calculateAttackRange(character);
@@ -597,23 +609,136 @@ class GameManager {
         this.redrawBattleScene();
     }
 
-    // 顯示取消按鈕
-    showCancelButton() {
-        if (this.cancelButton) {
-            this.cancelButton.style.display = 'block';
+    // 顯示角色行動菜單
+    showActionMenu(character) {
+        if (!this.actionMenu) {
+            return;
+        }
+        
+        // 計算角色在螢幕上的位置
+        const canvasRect = this.battleCanvas.getBoundingClientRect();
+        
+        // 模擬點擊處理的逆向計算
+        const simulatedClickX = (character.gridX * GAME_CONFIG.CELL_SIZE + GAME_CONFIG.CELL_SIZE / 2) * this.zoomLevel;
+        const simulatedClickY = (character.gridY * GAME_CONFIG.CELL_SIZE + GAME_CONFIG.CELL_SIZE / 2) * this.zoomLevel;
+        
+        // 轉換為螢幕座標
+        const screenX = canvasRect.left + simulatedClickX;
+        const screenY = canvasRect.top + simulatedClickY;
+        
+        // 計算菜單位置
+        const menuWidth = 250;
+        const menuHeight = 50;
+        const characterSize = GAME_CONFIG.CELL_SIZE * this.zoomLevel;
+        
+        let menuX = screenX - menuWidth / 2;
+        let menuY = screenY + characterSize / 2 + 10;
+        
+        // 邊界檢查
+        const margin = 10;
+        if (menuY + menuHeight > window.innerHeight - margin) {
+            menuY = screenY - characterSize / 2 - menuHeight - 10;
+        }
+        
+        if (menuX < margin) {
+            menuX = margin;
+        } else if (menuX + menuWidth > window.innerWidth - margin) {
+            menuX = window.innerWidth - menuWidth - margin;
+        }
+        
+        this.actionMenu.style.position = 'fixed';
+        this.actionMenu.style.left = menuX + 'px';
+        this.actionMenu.style.top = menuY + 'px';
+        this.actionMenu.style.zIndex = '1001';
+        
+        this.createActionButtons(character);
+        this.actionMenu.style.display = 'block';
+    }
+    
+    // 創建行動按鈕
+    createActionButtons(character) {
+        this.actionMenu.innerHTML = '';
+        
+        if (this.gameState === 'normal') {
+            // 正常狀態：移動, 攻擊, 技能1, 技能2, 待機
+            this.addActionButton('移動', () => this.startMovement(character));
+            this.addActionButton('攻擊', () => this.startAttack(character));
+            this.addActionButton('技能1', () => this.useSkill(character, 1));
+            this.addActionButton('技能2', () => this.useSkill(character, 2));
+            this.addActionButton('待機', () => this.standby(), 'standby');
+        } else if (this.gameState === 'moved') {
+            // 移動後狀態：攻擊, 技能1, 技能2, 待機, 取消
+            this.addActionButton('攻擊', () => this.startAttack(character));
+            this.addActionButton('技能1', () => this.useSkill(character, 1));
+            this.addActionButton('技能2', () => this.useSkill(character, 2));
+            this.addActionButton('待機', () => this.standby(), 'standby');
+            this.addActionButton('取消', () => this.cancelMovement(), 'cancel');
         }
     }
-
-    // 隱藏取消按鈕
-    hideCancelButton() {
-        if (this.cancelButton) {
-            this.cancelButton.style.display = 'none';
+    
+    // 添加行動按鈕
+    addActionButton(text, onClick, className = '') {
+        const button = document.createElement('button');
+        button.className = 'action-button' + (className ? ' ' + className : '');
+        button.textContent = text;
+        button.onclick = onClick;
+        this.actionMenu.appendChild(button);
+    }
+    
+    // 隱藏行動菜單
+    hideActionMenu() {
+        if (this.actionMenu) {
+            this.actionMenu.style.display = 'none';
         }
     }
-
-    // 取消動作
-    cancelAction() {
-        this.deselectCharacter();
+    
+    // 開始移動
+    startMovement(character) {
+        this.selectedCharacter = character;
+        this.movementRange = this.calculateMovementRange(character);
+        this.gameState = 'moving';
+        this.hideActionMenu();
+        console.log(`開始移動模式，移動範圍: ${this.movementRange.length} 格`);
+        this.redrawBattleScene();
+    }
+    
+    // 開始攻擊
+    startAttack(character) {
+        this.selectedCharacter = character;
+        this.attackRange = this.calculateAttackRange(character);
+        this.gameState = 'attacking';
+        this.hideActionMenu();
+        console.log(`開始攻擊模式，攻擊範圍: ${this.attackRange.length} 格`);
+        this.redrawBattleScene();
+    }
+    
+    // 使用技能
+    useSkill(character, skillNumber) {
+        console.log(`${character.isEnemy ? '敵人' : '玩家'}使用技能${skillNumber}`);
+        // TODO: 實現技能系統
+        this.hideActionMenu();
+        this.endTurn();
+    }
+    
+    // 待機
+    standby() {
+        console.log('選擇待機，結束回合');
+        this.hideActionMenu();
+        this.endTurn();
+    }
+    
+    // 取消移動
+    cancelMovement() {
+        if (this.originalPosition && this.selectedCharacter) {
+            console.log('取消移動，回到原位置');
+            this.selectedCharacter.gridX = this.originalPosition.x;
+            this.selectedCharacter.gridY = this.originalPosition.y;
+            this.originalPosition = null;
+            this.gameState = 'normal';
+            this.hideActionMenu();
+            this.showActionMenu(this.selectedCharacter);
+            this.redrawBattleScene();
+        }
     }
 
     // 執行攻擊
@@ -629,8 +754,173 @@ class GameManager {
             console.log(`${target.isEnemy ? '敵人' : '我方'}被擊敗!`);
         }
         
-        // 攻擊後回到普通狀態
+        // 攻擊後結束回合
+        this.endTurn();
+    }
+    
+    // 結束回合
+    endTurn() {
+        console.log('=== 結束回合被調用 ===');
+        console.log(`當前回合: ${this.currentTurn}`);
+        
         this.deselectCharacter();
+        this.currentTurn = this.currentTurn === 'player' ? 'enemy' : 'player';
+        this.updateTurnIndicator();
+        
+        console.log(`現在是${this.currentTurn === 'player' ? '玩家' : '敵人'}回合`);
+        
+        // 如果是敵人回合，執行AI
+        if (this.currentTurn === 'enemy') {
+            console.log('準備執行敵人回合...');
+            setTimeout(() => {
+                this.executeEnemyTurn();
+            }, 1000); // 延遲1秒讓玩家看清楚
+        }
+    }
+    
+    // 更新回合指示器
+    updateTurnIndicator() {
+        // 暫時用控制台輸出，之後可以加UI
+        console.log(`=== ${this.currentTurn === 'player' ? '玩家回合' : '敵人回合'} ===`);
+    }
+    
+    // 執行敵人回合
+    executeEnemyTurn() {
+        console.log('=== 執行敵人回合開始 ===');
+        const enemies = this.characters.filter(char => char.isEnemy && char.isAlive());
+        const players = this.characters.filter(char => !char.isEnemy && char.isAlive());
+        
+        console.log(`敵人數量: ${enemies.length}, 玩家數量: ${players.length}`);
+        
+        if (enemies.length === 0 || players.length === 0) {
+            console.log('遊戲結束！');
+            return;
+        }
+        
+        // 目前只處理第一個敵人
+        const enemy = enemies[0];
+        console.log(`處理敵人位置: (${enemy.gridX}, ${enemy.gridY})`);
+        this.executeEnemyAI(enemy, players);
+    }
+    
+    // 敵人AI邏輯
+    executeEnemyAI(enemy, targets) {
+        console.log('=== 敵人AI開始行動 ===');
+        console.log(`敵人當前位置: (${enemy.gridX}, ${enemy.gridY})`);
+        console.log(`目標玩家數量: ${targets.length}`);
+        
+        // 計算移動範圍和攻擊範圍
+        const moveRange = this.calculateMovementRange(enemy);
+        const attackRange = this.calculateAttackRange(enemy);
+        
+        console.log(`移動範圍: ${moveRange.length} 格, 攻擊範圍: ${attackRange.length} 格`);
+        
+        // 檢查是否有目標在移動+攻擊範圍內
+        let bestAction = null;
+        let minDistance = Infinity;
+        
+        // 檢查每個可移動位置
+        for (const movePos of moveRange) {
+            // 暫時移動敵人到這個位置來計算攻擊範圍
+            const originalX = enemy.gridX;
+            const originalY = enemy.gridY;
+            enemy.gridX = movePos.x;
+            enemy.gridY = movePos.y;
+            
+            const tempAttackRange = this.calculateAttackRange(enemy);
+            
+            // 檢查是否有目標在攻擊範圍內
+            for (const target of targets) {
+                const canAttack = tempAttackRange.some(pos => 
+                    pos.x === target.gridX && pos.y === target.gridY
+                );
+                
+                if (canAttack) {
+                    const distance = Math.abs(movePos.x - originalX) + Math.abs(movePos.y - originalY);
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        bestAction = {
+                            type: 'attack',
+                            moveX: movePos.x,
+                            moveY: movePos.y,
+                            target: target
+                        };
+                    }
+                }
+            }
+            
+            // 恢復原位置
+            enemy.gridX = originalX;
+            enemy.gridY = originalY;
+        }
+        
+        // 如果沒有可攻擊的目標，找最近的目標移動過去
+        if (!bestAction) {
+            let closestTarget = null;
+            let closestDistance = Infinity;
+            
+            for (const target of targets) {
+                const distance = Math.abs(enemy.gridX - target.gridX) + Math.abs(enemy.gridY - target.gridY);
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestTarget = target;
+                }
+            }
+            
+            if (closestTarget) {
+                // 找到朝向目標的最佳移動位置
+                let bestMovePos = {x: enemy.gridX, y: enemy.gridY};
+                let bestMoveDistance = closestDistance;
+                
+                for (const movePos of moveRange) {
+                    const distance = Math.abs(movePos.x - closestTarget.gridX) + Math.abs(movePos.y - closestTarget.gridY);
+                    if (distance < bestMoveDistance) {
+                        bestMoveDistance = distance;
+                        bestMovePos = movePos;
+                    }
+                }
+                
+                bestAction = {
+                    type: 'move',
+                    moveX: bestMovePos.x,
+                    moveY: bestMovePos.y
+                };
+            }
+        }
+        
+        // 執行行動
+        console.log('最終行動決策:', bestAction);
+        this.executeEnemyAction(enemy, bestAction);
+    }
+    
+    // 執行敵人行動
+    executeEnemyAction(enemy, action) {
+        if (!action) {
+            console.log('敵人無法行動');
+            this.endTurn();
+            return;
+        }
+        
+        // 移動
+        if (action.moveX !== enemy.gridX || action.moveY !== enemy.gridY) {
+            console.log(`敵人移動到 (${action.moveX}, ${action.moveY})`);
+            enemy.gridX = action.moveX;
+            enemy.gridY = action.moveY;
+            this.redrawBattleScene();
+        }
+        
+        // 攻擊
+        if (action.type === 'attack') {
+            setTimeout(() => {
+                console.log('敵人發動攻擊!');
+                this.performAttack(enemy, action.target);
+            }, 500);
+        } else {
+            // 只移動的話直接結束回合
+            setTimeout(() => {
+                this.endTurn();
+            }, 500);
+        }
     }
 
     // 取消選擇角色
@@ -639,7 +929,8 @@ class GameManager {
         this.movementRange = [];
         this.attackRange = [];
         this.gameState = 'normal';
-        this.hideCancelButton();
+        this.originalPosition = null;
+        this.hideActionMenu();
         this.redrawBattleScene();
     }
 
@@ -808,13 +1099,8 @@ class GameManager {
                     console.log('角色屬性:', clickedCharacter.getStatusInfo());
                     
                     if (this.gameState === 'moving') {
-                        // 移動模式下，如果點擊的是已選擇的角色，進入攻擊模式
-                        if (this.selectedCharacter === clickedCharacter) {
-                            this.enterAttackMode(clickedCharacter);
-                        } else {
-                            // 選擇新角色
-                            this.selectCharacter(clickedCharacter);
-                        }
+                        // 移動模式下，選擇新角色
+                        this.selectCharacter(clickedCharacter);
                     } else if (this.gameState === 'attacking') {
                         // 攻擊模式下，檢查是否點擊敵人並在攻擊範圍內
                         if (clickedCharacter.isEnemy) {
@@ -844,11 +1130,19 @@ class GameManager {
                         
                         if (inRange) {
                             console.log(`移動角色到 (${gridX}, ${gridY})`);
+                            // 記錄移動前位置
+                            this.originalPosition = {
+                                x: this.selectedCharacter.gridX,
+                                y: this.selectedCharacter.gridY
+                            };
                             // 移動角色
                             this.selectedCharacter.gridX = gridX;
                             this.selectedCharacter.gridY = gridY;
-                            // 移動後進入攻擊模式
-                            this.enterAttackMode(this.selectedCharacter);
+                            // 設置為移動後狀態
+                            this.gameState = 'moved';
+                            this.movementRange = [];
+                            this.showActionMenu(this.selectedCharacter);
+                            this.redrawBattleScene();
                         } else {
                             // 點擊範圍外，取消選擇
                             this.deselectCharacter();

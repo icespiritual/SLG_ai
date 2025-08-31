@@ -150,28 +150,52 @@
             cursor: pointer;
             font-size: 16px;
             transition: all 0.3s ease;
+            z-index: 1000; /* 確保按鈕在最上層 */
         }
 
         .back-button:hover {
             background: rgba(255,255,255,0.3);
         }
 
-        .cancel-button {
+        /* 角色行動菜單 */
+        .action-menu {
             position: absolute;
-            top: 20px;
-            left: 120px;
-            background: rgba(255,100,100,0.8);
+            background: rgba(0, 0, 0, 0.8);
             border: 2px solid white;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 16px;
-            transition: all 0.3s ease;
+            border-radius: 8px;
+            padding: 8px;
+            display: none;
+            z-index: 1001;
+            white-space: nowrap;
         }
 
-        .cancel-button:hover {
-            background: rgba(255,100,100,1);
+        .action-button {
+            background: linear-gradient(45deg, #4a90e2, #357abd);
+            border: 1px solid white;
+            color: white;
+            padding: 8px 12px;
+            margin: 2px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+            display: inline-block;
+            transition: all 0.2s ease;
+            min-width: 50px;
+            text-align: center;
+        }
+
+        .action-button:hover {
+            background: linear-gradient(45deg, #357abd, #2968a3);
+            transform: translateY(-1px);
+        }
+
+        .action-button.cancel {
+            background: linear-gradient(45deg, #e74c3c, #c0392b);
+        }
+
+        .action-button.cancel:hover {
+            background: linear-gradient(45deg, #c0392b, #a93226);
         }
     </style>
 </head>
@@ -195,9 +219,9 @@
     <!-- 戰鬥頁面 -->
     <div id="battlePage" class="page">
         <button class="back-button" onclick="gameManager.switchPage('mainMenu')">← 返回</button>
-        <button id="cancelButton" class="cancel-button" onclick="gameManager.cancelAction()" style="display: none;">取消</button>
         <div class="battle-container" id="battleContainer">
             <canvas id="battleCanvas" class="battle-grid"></canvas>
+            <div id="actionMenu" class="action-menu"></div>
         </div>
     </div>
 
