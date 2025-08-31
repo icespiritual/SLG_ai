@@ -572,35 +572,70 @@ class GameManager {
     centerCameraOnCharacter(character) {
         if (!character || !this.battleCanvas) return;
         
-        // 計算角色在畫布上的像素位置（角色中心）
+        // 計算目標位置
         const characterPixelX = character.gridX * GAME_CONFIG.CELL_SIZE + GAME_CONFIG.CELL_SIZE / 2;
         const characterPixelY = character.gridY * GAME_CONFIG.CELL_SIZE + GAME_CONFIG.CELL_SIZE / 2;
         
-        // 計算畫布尺寸
         const canvasWidth = GAME_CONFIG.GRID_COLS * GAME_CONFIG.CELL_SIZE;
         const canvasHeight = GAME_CONFIG.GRID_ROWS * GAME_CONFIG.CELL_SIZE;
         
-        // 計算畫布中心點
         const canvasCenterX = canvasWidth / 2;
         const canvasCenterY = canvasHeight / 2;
         
-        // 計算角色相對於畫布中心的偏移
         const offsetFromCanvasCenterX = characterPixelX - canvasCenterX;
         const offsetFromCanvasCenterY = characterPixelY - canvasCenterY;
         
-        // 由於CSS已經將畫布置中，我們只需要反向移動這個偏移
-        // 再乘以縮放因子
-        this.battleOffsetX = -offsetFromCanvasCenterX * this.zoomLevel;
-        this.battleOffsetY = -offsetFromCanvasCenterY * this.zoomLevel;
+        const targetOffsetX = -offsetFromCanvasCenterX * this.zoomLevel;
+        const targetOffsetY = -offsetFromCanvasCenterY * this.zoomLevel;
         
-        // 更新畫面位置
-        this.updateBattlePosition();
+        // 使用動畫移動鏡頭
+        this.animateCameraTo(targetOffsetX, targetOffsetY);
         
         console.log(`鏡頭移動到角色位置: (${character.gridX}, ${character.gridY})`);
-        console.log(`角色像素位置: (${characterPixelX}, ${characterPixelY})`);
-        console.log(`畫布中心: (${canvasCenterX}, ${canvasCenterY})`);
-        console.log(`相對偏移: (${offsetFromCanvasCenterX}, ${offsetFromCanvasCenterY})`);
-        console.log(`最終偏移量: (${this.battleOffsetX}, ${this.battleOffsetY})`);
+    }
+    
+    // 動畫移動鏡頭到指定位置
+    animateCameraTo(targetX, targetY) {
+        const startX = this.battleOffsetX;
+        const startY = this.battleOffsetY;
+        
+        // 計算移動距離
+        const deltaX = targetX - startX;
+        const deltaY = targetY - startY;
+        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+        
+        // 設定基礎移動速度（像素/毫秒）
+        const baseSpeed = 2.0; // 每毫秒移動2像素
+        
+        // 根據距離計算動畫時間，最大800ms
+        const calculatedDuration = distance / baseSpeed;
+        const duration = Math.min(calculatedDuration, 800);
+        
+        const startTime = Date.now();
+        
+        const animate = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            
+            // 使用緩動函數讓移動更自然
+            const easeProgress = this.easeInOutQuad(progress);
+            
+            this.battleOffsetX = startX + deltaX * easeProgress;
+            this.battleOffsetY = startY + deltaY * easeProgress;
+            
+            this.updateBattlePosition();
+            
+            if (progress < 1) {
+                requestAnimationFrame(animate);
+            }
+        };
+        
+        requestAnimationFrame(animate);
+    }
+    
+    // 緩動函數（二次方緩入緩出）
+    easeInOutQuad(t) {
+        return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
     }
     
     // 推進時間系統
