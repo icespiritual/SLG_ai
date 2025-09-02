@@ -8,10 +8,21 @@ const GAME_CONFIG = {
     CELL_SIZE: 200,  // 每個格子的大小(像素) - 放大4倍 (50 * 4 = 200)
     
     // 角色配置
-    CHAR_SPRITE_X: 20,  // 角色圖片中的 X 座標
-    CHAR_SPRITE_Y: 0,   // 角色圖片中的 Y 座標
-    CHAR_SPRITE_W: 20,  // 角色圖片寬度 (39-20+1)
-    CHAR_SPRITE_H: 32,  // 角色圖片高度 (31-0+1)
+    CHAR_SPRITE_W: 20,  // 每個角色圖片寬度
+    CHAR_SPRITE_H: 32,  // 每個角色圖片高度
+    SPRITE_SHEET_COLS: 3, // 精靈圖每排的圖片數量
+    SPRITE_SHEET_ROWS: 4, // 精靈圖的排數
+    
+    // 動畫配置
+    ANIMATION_SPEED: 300, // 每幀動畫間隔（毫秒）
+    
+    // 方向常數
+    DIRECTION: {
+        DOWN: 0,  // 朝下
+        LEFT: 1,  // 朝左
+        RIGHT: 2, // 朝右
+        UP: 3     // 朝上
+    }
 };
 
 // 角色類別
@@ -22,6 +33,25 @@ class Character {
         this.spriteImage = spriteImage;  // 角色圖片
         this.isLoaded = false;   // 圖片是否載入完成
         this.isEnemy = isEnemy;  // 是否為敵人
+        
+        // 動畫相關屬性
+        this.facing = GAME_CONFIG.DIRECTION.DOWN; // 當前朝向
+        this.animationFrame = 0; // 當前動畫幀 (從0開始：0=左腳, 1=併攏, 2=右腳)
+        this.animationSequenceIndex = 0; // 動畫序列中的當前索引
+        this.lastAnimationTime = 0; // 上次動畫更新時間
+        this.isAnimating = true; // 是否播放動畫
+        
+        // 移動動畫相關
+        this.isMoving = false; // 是否正在移動
+        this.movePath = []; // 移動路徑
+        this.moveStartTime = 0; // 移動開始時間
+        this.moveDuration = 500; // 移動時間（毫秒）
+        this.moveStartX = 0; // 移動開始的X座標
+        this.moveStartY = 0; // 移動開始的Y座標
+        this.moveTargetX = 0; // 移動目標的X座標
+        this.moveTargetY = 0; // 移動目標的Y座標
+        this.renderX = gridX; // 渲染用的X座標（支援小數）
+        this.renderY = gridY; // 渲染用的Y座標（支援小數）
         
         // 角色屬性
         this.stats = {
@@ -41,6 +71,176 @@ class Character {
         // 速度制系統相關
         this.waitTime = 0;              // 等待時間
         this.hasActed = false;          // 本輪是否已行動
+    }
+    
+    // 更新動畫
+    updateAnimation() {
+        if (!this.isAnimating) return;
+        
+        const currentTime = Date.now();
+        if (currentTime - this.lastAnimationTime >= GAME_CONFIG.ANIMATION_SPEED) {
+            // 動畫序列：左腳(0) -> 併攏(1) -> 右腳(2) -> 併攏(1) -> 循環
+            const animationSequence = [0, 2];//[0, 1, 2, 1];
+            
+            // 移動到下一個索引
+            this.animationSequenceIndex = (this.animationSequenceIndex + 1) % animationSequence.length;
+            
+            // 設定對應的動畫幀
+            this.animationFrame = animationSequence[this.animationSequenceIndex];
+            
+            this.lastAnimationTime = currentTime;
+        }
+    }
+    
+    // 設定角色朝向
+    setFacing(direction) {
+        this.facing = direction;
+    }
+    
+    // 開始/停止動畫
+    setAnimating(isAnimating) {
+        this.isAnimating = isAnimating;
+        if (!isAnimating) {
+            this.animationFrame = 1; // 停止時回到併攏狀態
+        }
+    }
+    
+    // 開始移動動畫
+    startMovingTo(targetX, targetY, onComplete = null) {
+        // 如果已經在目標位置，直接完成
+        if (this.gridX === targetX && this.gridY === targetY) {
+            if (onComplete) onComplete();
+            return;
+        }
+        
+        // 計算完整的移動路徑
+        this.movePath = this.calculateMovePath(this.gridX, this.gridY, targetX, targetY);
+        
+        if (this.movePath.length === 0) {
+            if (onComplete) onComplete();
+            return;
+        }
+        
+        this.isMoving = true;
+        this.moveStartTime = Date.now();
+        this.onMoveComplete = onComplete;
+        
+        // 設定整個路徑的起點和終點
+        this.moveStartX = this.gridX;
+        this.moveStartY = this.gridY;
+        this.moveTargetX = targetX;
+        this.moveTargetY = targetY;
+        
+        // 初始化渲染座標
+        this.renderX = this.gridX;
+        this.renderY = this.gridY;
+        
+        // 設定朝向（基於整體移動方向）
+        this.setFacingFromMovement(targetX - this.gridX, targetY - this.gridY);
+        
+        // 計算總移動時間（整個路徑一次完成）
+        const totalDistance = this.movePath.length;
+        this.moveDuration = Math.max(200, totalDistance * 120); // 每格120ms，最少200ms
+    }
+    
+    // 根據整體移動方向設定朝向
+    setFacingFromMovement(deltaX, deltaY) {
+        if (Math.abs(deltaY) > Math.abs(deltaX)) {
+            // 垂直移動優先
+            this.facing = deltaY > 0 ? GAME_CONFIG.DIRECTION.DOWN : GAME_CONFIG.DIRECTION.UP;
+        } else if (deltaX !== 0) {
+            // 水平移動
+            this.facing = deltaX > 0 ? GAME_CONFIG.DIRECTION.RIGHT : GAME_CONFIG.DIRECTION.LEFT;
+        }
+    }
+
+    // 計算移動路徑（L形路徑：先水平後垂直）
+    calculateMovePath(startX, startY, endX, endY) {
+        const path = [];
+        let currentX = startX;
+        let currentY = startY;
+        
+        // 先水平移動
+        while (currentX !== endX) {
+            const deltaX = currentX < endX ? 1 : -1;
+            path.push({ x: currentX + deltaX, y: currentY });
+            currentX += deltaX;
+        }
+        
+        // 再垂直移動
+        while (currentY !== endY) {
+            const deltaY = currentY < endY ? 1 : -1;
+            path.push({ x: currentX, y: currentY + deltaY });
+            currentY += deltaY;
+        }
+        
+        return path;
+    }
+    
+    // 更新移動動畫
+    updateMovement() {
+        if (!this.isMoving) {
+            // 確保渲染座標與網格座標同步
+            this.renderX = this.gridX;
+            this.renderY = this.gridY;
+            return;
+        }
+        
+        const currentTime = Date.now();
+        const elapsed = currentTime - this.moveStartTime;
+        const progress = Math.min(elapsed / this.moveDuration, 1);
+        
+        if (this.movePath && this.movePath.length > 0) {
+            // 沿路徑平滑移動
+            const totalSegments = this.movePath.length;
+            const currentSegmentFloat = progress * totalSegments;
+            const currentSegmentIndex = Math.floor(currentSegmentFloat);
+            const segmentProgress = currentSegmentFloat - currentSegmentIndex;
+            
+            let startX, startY, endX, endY;
+            
+            if (currentSegmentIndex === 0) {
+                // 第一段：從起始位置到第一個路徑點
+                startX = this.moveStartX;
+                startY = this.moveStartY;
+                endX = this.movePath[0].x;
+                endY = this.movePath[0].y;
+            } else if (currentSegmentIndex >= totalSegments) {
+                // 最後到達目標
+                startX = endX = this.moveTargetX;
+                startY = endY = this.moveTargetY;
+            } else {
+                // 中間段：從前一個路徑點到當前路徑點
+                startX = this.movePath[currentSegmentIndex - 1].x;
+                startY = this.movePath[currentSegmentIndex - 1].y;
+                endX = this.movePath[currentSegmentIndex].x;
+                endY = this.movePath[currentSegmentIndex].y;
+            }
+            
+            // 使用線性插值在當前段內移動
+            this.renderX = startX + (endX - startX) * segmentProgress;
+            this.renderY = startY + (endY - startY) * segmentProgress;
+        }
+        
+        // 移動完成
+        if (progress >= 1) {
+            this.isMoving = false;
+            this.gridX = this.moveTargetX;
+            this.gridY = this.moveTargetY;
+            this.renderX = this.gridX;
+            this.renderY = this.gridY;
+            this.facing = GAME_CONFIG.DIRECTION.DOWN; // 恢復朝下
+            
+            if (this.onMoveComplete) {
+                this.onMoveComplete();
+                this.onMoveComplete = null;
+            }
+        }
+    }
+    
+    // 緩動函數（二次方緩入緩出）
+    easeInOutQuad(t) {
+        return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
     }
     
     // 取得角色狀態資訊
@@ -101,12 +301,16 @@ class Character {
     draw(ctx, offsetX = 0, offsetY = 0) {
         if (!this.isLoaded || !this.spriteImage) return;
         
+        // 更新動畫和移動
+        this.updateAnimation();
+        this.updateMovement();
+        
         // 設置像素完美渲染
         ctx.imageSmoothingEnabled = false;
         
-        // 計算格子的基礎位置
-        const cellX = this.gridX * GAME_CONFIG.CELL_SIZE + offsetX;
-        const cellY = this.gridY * GAME_CONFIG.CELL_SIZE + offsetY;
+        // 計算格子的基礎位置（使用渲染座標支援平滑移動）
+        const cellX = this.renderX * GAME_CONFIG.CELL_SIZE + offsetX;
+        const cellY = this.renderY * GAME_CONFIG.CELL_SIZE + offsetY;
         
         // 計算角色圖片的原始比例
         const spriteAspectRatio = GAME_CONFIG.CHAR_SPRITE_W / GAME_CONFIG.CHAR_SPRITE_H;
@@ -129,11 +333,15 @@ class Character {
         const charX = cellX + (GAME_CONFIG.CELL_SIZE - charWidth) / 2;
         const charY = cellY + (GAME_CONFIG.CELL_SIZE - charHeight) / 2;
         
-        // 從原圖中擷取指定區域並繪製到置中位置
+        // 計算精靈圖中的位置
+        const spriteX = this.animationFrame * GAME_CONFIG.CHAR_SPRITE_W;
+        const spriteY = this.facing * GAME_CONFIG.CHAR_SPRITE_H;
+        
+        // 從精靈圖中擷取指定區域並繪製到置中位置
         ctx.drawImage(
             this.spriteImage,
-            GAME_CONFIG.CHAR_SPRITE_X,     // 源圖 X
-            GAME_CONFIG.CHAR_SPRITE_Y,     // 源圖 Y
+            spriteX,                       // 源圖 X (根據動畫幀)
+            spriteY,                       // 源圖 Y (根據朝向)
             GAME_CONFIG.CHAR_SPRITE_W,     // 源圖寬度
             GAME_CONFIG.CHAR_SPRITE_H,     // 源圖高度
             charX,                         // 目標 X (置中)
@@ -711,11 +919,15 @@ class GameManager {
                 const iconCtx = iconCanvas.getContext('2d');
                 iconCtx.imageSmoothingEnabled = false;
                 
+                // 使用角色當前的動畫幀和朝向
+                const spriteX = character.animationFrame * GAME_CONFIG.CHAR_SPRITE_W;
+                const spriteY = character.facing * GAME_CONFIG.CHAR_SPRITE_H;
+                
                 // 從角色圖片中擷取指定區域的上半部分
                 iconCtx.drawImage(
                     character.spriteImage,
-                    GAME_CONFIG.CHAR_SPRITE_X,     // 源圖 X
-                    GAME_CONFIG.CHAR_SPRITE_Y,     // 源圖 Y
+                    spriteX,                       // 源圖 X (根據動畫幀)
+                    spriteY,                       // 源圖 Y (根據朝向)
                     GAME_CONFIG.CHAR_SPRITE_W,     // 源圖寬度
                     GAME_CONFIG.CHAR_SPRITE_H / 2, // 源圖高度的一半（上半部）
                     0,                             // 目標 X
@@ -779,6 +991,22 @@ class GameManager {
         
         // 初始化角色
         this.initializeCharacters();
+        
+        // 啟動動畫循環
+        this.startAnimationLoop();
+    }
+    
+    // 啟動動畫循環
+    startAnimationLoop() {
+        const animate = () => {
+            // 重繪戰鬥場景（包含角色動畫更新）
+            this.redrawBattleScene();
+            
+            // 繼續動畫循環
+            requestAnimationFrame(animate);
+        };
+        
+        requestAnimationFrame(animate);
     }
 
     // 繪製戰鬥網格
@@ -1117,9 +1345,18 @@ class GameManager {
     // 取消移動
     cancelMovement() {
         if (this.originalPosition && this.selectedCharacter) {
-            console.log('取消移動，回到原位置');
+            console.log('取消移動，瞬間回到原位置');
+            
+            // 停止當前移動動畫
+            this.selectedCharacter.isMoving = false;
+            
+            // 瞬間回到原位置
             this.selectedCharacter.gridX = this.originalPosition.x;
             this.selectedCharacter.gridY = this.originalPosition.y;
+            this.selectedCharacter.renderX = this.originalPosition.x;
+            this.selectedCharacter.renderY = this.originalPosition.y;
+            this.selectedCharacter.facing = GAME_CONFIG.DIRECTION.DOWN; // 恢復朝下
+            
             this.originalPosition = null;
             this.gameState = 'normal';
             this.hideActionMenu();
@@ -1304,24 +1541,39 @@ class GameManager {
         // 移動
         if (action.moveX !== enemy.gridX || action.moveY !== enemy.gridY) {
             console.log(`敵人移動到 (${action.moveX}, ${action.moveY})`);
-            enemy.gridX = action.moveX;
-            enemy.gridY = action.moveY;
-            this.redrawBattleScene();
-        }
-        
-        // 攻擊
-        if (action.type === 'attack') {
-            setTimeout(() => {
-                console.log('敵人發動攻擊!');
-                this.performAttack(enemy, action.target);
-            }, 500);
+            
+            // 使用移動動畫
+            enemy.startMovingTo(action.moveX, action.moveY, () => {
+                // 移動完成後執行攻擊或結束回合
+                if (action.type === 'attack') {
+                    setTimeout(() => {
+                        console.log('敵人發動攻擊!');
+                        this.performAttack(enemy, action.target);
+                    }, 200);
+                } else {
+                    // 只移動的話直接結束回合
+                    console.log('敵人只移動，準備結束回合...');
+                    setTimeout(() => {
+                        console.log('呼叫 completeCharacterAction');
+                        this.completeCharacterAction(enemy);
+                    }, 300);
+                }
+            });
         } else {
-            // 只移動的話直接結束回合
-            console.log('敵人只移動，準備結束回合...');
-            setTimeout(() => {
-                console.log('呼叫 completeCharacterAction');
-                this.completeCharacterAction(enemy);
-            }, 500);
+            // 沒有移動，直接執行攻擊
+            if (action.type === 'attack') {
+                setTimeout(() => {
+                    console.log('敵人發動攻擊!');
+                    this.performAttack(enemy, action.target);
+                }, 500);
+            } else {
+                // 直接結束回合
+                console.log('敵人無移動，準備結束回合...');
+                setTimeout(() => {
+                    console.log('呼叫 completeCharacterAction');
+                    this.completeCharacterAction(enemy);
+                }, 500);
+            }
         }
     }
 
@@ -1635,14 +1887,15 @@ class GameManager {
                                 x: this.selectedCharacter.gridX,
                                 y: this.selectedCharacter.gridY
                             };
-                            // 移動角色
-                            this.selectedCharacter.gridX = gridX;
-                            this.selectedCharacter.gridY = gridY;
-                            // 設置為移動後狀態
-                            this.gameState = 'moved';
-                            this.movementRange = [];
-                            this.showActionMenu(this.selectedCharacter);
-                            this.redrawBattleScene();
+                            
+                            // 開始移動動畫
+                            this.selectedCharacter.startMovingTo(gridX, gridY, () => {
+                                // 移動完成後的回調
+                                this.gameState = 'moved';
+                                this.movementRange = [];
+                                this.showActionMenu(this.selectedCharacter);
+                                this.redrawBattleScene();
+                            });
                         } else {
                             // 點擊範圍外，取消選擇
                             this.deselectCharacter();
