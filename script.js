@@ -385,6 +385,88 @@ class Character {
     }
 }
 
+// 攻擊特效類
+class AttackEffect {
+    constructor(x, y, colorIndex = 0, onComplete = null) {
+        this.gridX = x;
+        this.gridY = y;
+        this.colorIndex = colorIndex; // 0-8 對應不同顏色的橫排
+        this.onComplete = onComplete;
+        
+        // 動畫相關
+        this.frameIndex = 0; // 當前frame (0-8)
+        this.lastFrameTime = 0;
+        this.frameDelay = 80; // 每frame間隔80ms
+        this.isPlaying = true;
+        
+        // 載入特效圖片
+        this.effectImage = new Image();
+        this.effectImage.src = 'effects/001.png';
+        this.imageLoaded = false;
+        
+        this.effectImage.onload = () => {
+            this.imageLoaded = true;
+            console.log('攻擊特效圖片載入完成');
+        };
+        
+        this.effectImage.onerror = () => {
+            console.error('攻擊特效圖片載入失敗: effects/001.png');
+        };
+    }
+    
+    // 更新動畫
+    update() {
+        if (!this.isPlaying || !this.imageLoaded) return false;
+        
+        const currentTime = Date.now();
+        if (currentTime - this.lastFrameTime >= this.frameDelay) {
+            this.frameIndex++;
+            this.lastFrameTime = currentTime;
+            
+            // 動畫播放完成（9個frame播完）
+            if (this.frameIndex >= 9) {
+                this.isPlaying = false;
+                if (this.onComplete) {
+                    this.onComplete();
+                }
+                return true; // 標示要被移除
+            }
+        }
+        
+        return false;
+    }
+    
+    // 繪製特效
+    draw(ctx, offsetX = 0, offsetY = 0) {
+        if (!this.isPlaying || !this.imageLoaded) return;
+        
+        // 設置像素完美渲染（與角色保持一致）
+        ctx.imageSmoothingEnabled = false;
+        
+        // 使用與角色相同的位置計算方式
+        const CELL_SIZE = GAME_CONFIG.CELL_SIZE;
+        
+        // 計算格子位置（與角色的位置計算保持一致）
+        const cellX = this.gridX * CELL_SIZE + offsetX;
+        const cellY = this.gridY * CELL_SIZE + offsetY;
+        
+        // 計算特效大小（縮小到0.8倍）
+        const effectSize = CELL_SIZE * 0.8;
+        const effectOffset = (CELL_SIZE - effectSize) / 2; // 居中偏移
+        
+        // 計算sprite位置（9x9網格，每個64x64）
+        const sourceX = this.frameIndex * 64;
+        const sourceY = this.colorIndex * 64;
+        
+        // 繪製特效（縮小到0.8倍並居中）
+        ctx.drawImage(
+            this.effectImage,
+            sourceX, sourceY, 64, 64, // 來源
+            cellX + effectOffset, cellY + effectOffset, effectSize, effectSize // 目標
+        );
+    }
+}
+
 // 傷害數字類
 class DamageNumber {
     constructor(damage, gridX, gridY, onComplete = null) {
@@ -500,6 +582,9 @@ class GameManager {
         // 角色系統
         this.characters = [];
         this.characterSprites = {};
+        
+        // 特效系統
+        this.attackEffects = []; // 攻擊特效陣列
         
         // 移動系統
         this.selectedCharacter = null;
@@ -1374,18 +1459,21 @@ class GameManager {
         console.log(`造成 ${damage} 點傷害`);
         console.log(`目標剩餘HP: ${target.stats.hp}/${target.stats.maxhp}`);
         
-        // 顯示傷害數字，並在動畫完成後繼續行動
-        this.addDamageNumber(damage, target.gridX, target.gridY, () => {
-            // 傷害動畫完成後的回調
-            console.log('傷害動畫完成，繼續下一個角色行動');
-            this.completeCharacterAction(attacker);
+        // 先播放攻擊特效，然後顯示傷害數字
+        this.addAttackEffect(target.gridX, target.gridY, 0, () => {
+            // 攻擊特效完成後顯示傷害數字
+            this.addDamageNumber(damage, target.gridX, target.gridY, () => {
+                // 傷害動畫完成後的回調
+                console.log('攻擊動畫完成，繼續下一個角色行動');
+                this.completeCharacterAction(attacker);
+            });
         });
         
         if (isDead) {
             console.log(`${target.isEnemy ? '敵人' : '我方'}被擊敗!`);
         }
         
-        console.log('等待傷害動畫完成...');
+        console.log('等待攻擊動畫完成...');
         // 注意：不在這裡直接調用 completeCharacterAction，改為在動畫完成後調用
     }
     
@@ -1612,6 +1700,9 @@ class GameManager {
             character.draw(this.battleCtx);
         });
         
+        // 繪製攻擊特效（在角色下方）
+        this.drawAttackEffects();
+        
         // 繪製傷害數字（在角色上方）
         this.drawDamageNumbers();
     }
@@ -1658,6 +1749,16 @@ class GameManager {
         ctx.restore();
     }
     
+    // 繪製攻擊特效
+    drawAttackEffects() {
+        if (!this.battleCtx) return;
+        
+        // 與角色繪製保持一致，不傳遞相機偏移
+        this.attackEffects.forEach(effect => {
+            effect.draw(this.battleCtx, 0, 0);
+        });
+    }
+    
     // 添加傷害數字
     addDamageNumber(damage, gridX, gridY, onComplete = null) {
         const damageNumber = new DamageNumber(damage, gridX, gridY, onComplete);
@@ -1667,6 +1768,35 @@ class GameManager {
         if (this.damageNumbers.length === 1) {
             this.startDamageAnimation();
         }
+    }
+    
+    // 添加攻擊特效
+    addAttackEffect(gridX, gridY, colorIndex = 0, onComplete = null) {
+        const attackEffect = new AttackEffect(gridX, gridY, colorIndex, onComplete);
+        this.attackEffects.push(attackEffect);
+        
+        // 開始特效動畫循環（如果還沒開始）
+        if (this.attackEffects.length === 1) {
+            this.startAttackEffectAnimation();
+        }
+    }
+    
+    // 開始攻擊特效動畫
+    startAttackEffectAnimation() {
+        const animate = () => {
+            // 更新所有攻擊特效
+            this.attackEffects = this.attackEffects.filter(effect => !effect.update());
+            
+            // 重繪場景
+            this.redrawBattleScene();
+            
+            // 如果還有特效在播放，繼續動畫
+            if (this.attackEffects.length > 0) {
+                requestAnimationFrame(animate);
+            }
+        };
+        
+        requestAnimationFrame(animate);
     }
     
     // 開始傷害數字動畫

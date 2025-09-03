@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>生成測試攻擊特效</title>
+</head>
+<body>
+    <h2>生成測試攻擊特效圖片</h2>
+    <canvas id="canvas" width="576" height="576" style="border: 1px solid black;"></canvas>
+    <br><br>
+    <button onclick="generateEffect()">生成測試圖片</button>
+    <button onclick="downloadImage()">下載圖片</button>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        function generateEffect() {
+            ctx.clearRect(0, 0, 576, 576);
+            
+            // 生成9x9網格的測試圖片
+            for (let row = 0; row < 9; row++) {
+                for (let col = 0; col < 9; col++) {
+                    const x = col * 64;
+                    const y = row * 64;
+                    
+                    // 每一橫排使用不同顏色
+                    const hue = (row * 40) % 360;
+                    ctx.fillStyle = `hsl(${hue}, 70%, 50%)`;
+                    
+                    // 繪製一個漸變圓形作為攻擊特效
+                    const centerX = x + 32;
+                    const centerY = y + 32;
+                    const radius = Math.max(5, 30 - col * 3); // 從大到小
+                    
+                    const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+                    gradient.addColorStop(0, `hsla(${hue}, 80%, 80%, 1)`);
+                    gradient.addColorStop(0.7, `hsla(${hue}, 70%, 50%, 0.8)`);
+                    gradient.addColorStop(1, `hsla(${hue}, 60%, 30%, 0.1)`);
+                    
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // 添加一些裝飾線條
+                    ctx.strokeStyle = `hsla(${hue}, 80%, 80%, 0.6)`;
+                    ctx.lineWidth = 2;
+                    for (let i = 0; i < 8; i++) {
+                        const angle = (i / 8) * Math.PI * 2;
+                        const startR = radius * 0.3;
+                        const endR = radius * 0.9;
+                        ctx.beginPath();
+                        ctx.moveTo(centerX + Math.cos(angle) * startR, centerY + Math.sin(angle) * startR);
+                        ctx.lineTo(centerX + Math.cos(angle) * endR, centerY + Math.sin(angle) * endR);
+                        ctx.stroke();
+                    }
+                }
+            }
+            
+            console.log('測試攻擊特效圖片生成完成');
+        }
+
+        function downloadImage() {
+            const link = document.createElement('a');
+            link.download = '001.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+
+        // 自動生成圖片
+        generateEffect();
+    </script>
+</body>
+</html>
