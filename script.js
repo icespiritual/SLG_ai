@@ -71,6 +71,9 @@ class Character {
         // 速度制系統相關
         this.waitTime = 0;              // 等待時間
         this.hasActed = false;          // 本輪是否已行動
+        
+        // Buff系統
+        this.buffs = [];                // 角色身上的buff列表
     }
     
     // 更新動畫
@@ -287,6 +290,72 @@ class Character {
         return false; // 魔力不足
     }
     
+    // Buff系統方法
+    
+    // 添加buff
+    addBuff(buff) {
+        this.buffs.push(buff);
+        console.log(`${this.isEnemy ? '敵人' : '我方'}獲得buff: ${buff.name}`);
+    }
+    
+    // 移除buff
+    removeBuff(buffId) {
+        this.buffs = this.buffs.filter(buff => buff.id !== buffId);
+    }
+    
+    // 清除所有buff
+    clearBuffs() {
+        this.buffs = [];
+    }
+    
+    // 減少buff持續時間（回合結束時調用）
+    decreaseBuffDuration() {
+        this.buffs = this.buffs.filter(buff => !buff.decreaseDuration());
+    }
+    
+    // 獲取應用buff後的屬性值
+    getBuffedStat(statName) {
+        let baseValue = this.stats[statName];
+        if (baseValue === undefined) return 0;
+        
+        // 應用所有相關的buff
+        this.buffs.forEach(buff => {
+            if (buff.type === statName) {
+                baseValue = buff.applyTo(baseValue);
+            }
+        });
+        
+        return Math.round(baseValue);
+    }
+    
+    // 獲取應用buff後的傷害
+    getBuffedDamage(baseDamage) {
+        let finalDamage = baseDamage;
+        
+        // 應用傷害加成buff
+        this.buffs.forEach(buff => {
+            if (buff.type === 'damage_bonus') {
+                finalDamage = buff.applyTo(finalDamage);
+            }
+        });
+        
+        return Math.round(finalDamage);
+    }
+    
+    // 獲取應用buff後的最終受傷害
+    getBuffedDamageTaken(baseDamage) {
+        let finalDamage = baseDamage;
+        
+        // 應用減傷buff
+        this.buffs.forEach(buff => {
+            if (buff.type === 'damage_reduce') {
+                finalDamage = buff.applyTo(finalDamage);
+            }
+        });
+        
+        return Math.round(finalDamage);
+    }
+    
     // 恢復魔力
     restoreMP(amount) {
         this.stats.mp = Math.min(this.stats.maxmp, this.stats.mp + amount);
@@ -382,6 +451,46 @@ class Character {
         ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
         
         ctx.restore();
+    }
+}
+
+// Buff類
+class Buff {
+    constructor(type, value, duration, name, description) {
+        this.type = type;           // buff類型: 'spd', 'str', 'def', 'damage_bonus' 等
+        this.value = value;         // buff數值 (可以是固定值或百分比)
+        this.isPercentage = false;  // 是否為百分比
+        this.duration = duration;   // 持續回合數 (-1 表示永久)
+        this.name = name;           // buff名稱
+        this.description = description; // buff描述
+        this.id = Math.random().toString(36).substr(2, 9); // 唯一ID
+    }
+    
+    // 設定為百分比buff
+    setPercentage(isPercentage = true) {
+        this.isPercentage = isPercentage;
+        return this;
+    }
+    
+    // 減少持續時間
+    decreaseDuration() {
+        if (this.duration > 0) {
+            this.duration--;
+        }
+        return this.duration <= 0 && this.duration !== -1; // 返回是否應該移除
+    }
+    
+    // 應用buff到數值上
+    applyTo(baseValue) {
+        if (this.type === 'damage_reduce') {
+            // 減傷buff: value為百分比，直接減少最終傷害
+            return baseValue * (1 - this.value / 100);
+        }
+        if (this.isPercentage) {
+            return baseValue * (1 + this.value / 100);
+        } else {
+            return baseValue + this.value;
+        }
     }
 }
 
@@ -718,6 +827,11 @@ class GameManager {
             const player = new Character(6, 4, playerSpriteImage, playerStats, false);
             player.isLoaded = true;
             
+            // 為主角添加速度增加10%的buff作為測試
+            const speedBuff = new Buff('spd', 10, -1, '敏捷增強', '速度增加10%').setPercentage(true);
+            player.addBuff(speedBuff);
+            console.log(`主角獲得速度buff，當前速度: ${player.stats.spd} -> ${player.getBuffedStat('spd')}`);
+            
             // 載入第二個我方角色圖片
             const ally1SpriteImage = await this.loadCharacterSprite('001.png', 'chara');
             
@@ -761,6 +875,10 @@ class GameManager {
             // 創建敵人並放在 (8, 5) 位置
             const enemy = new Character(8, 5, enemySpriteImage, enemyStats, true);
             enemy.isLoaded = true;
+            // 為敵人添加減傷10%的buff作為測試
+            const reduceBuff = new Buff('damage_reduce', 10, -1, '減傷', '受到傷害減少10%').setPercentage(true);
+            enemy.addBuff(reduceBuff);
+            console.log(`敵人獲得減傷buff`);
             
             this.characters = [player, ally1, enemy];
             
@@ -786,7 +904,7 @@ class GameManager {
         // 為所有角色計算初始等待時間並加入佇列
         this.characters.forEach(character => {
             if (character.isAlive()) {
-                character.waitTime = this.SPEED_BASE / character.stats.spd;
+                character.waitTime = this.SPEED_BASE / character.getBuffedStat('spd');
                 character.hasActed = false;
                 this.actionQueue.push(character);
             }
@@ -954,7 +1072,7 @@ class GameManager {
         console.log(`角色: ${character.isEnemy ? '敵人' : '主角'}`);
         
         // 重新計算等待時間（角色行動後需要等待下一次行動）
-        character.waitTime = this.SPEED_BASE / character.stats.spd;
+        character.waitTime = this.SPEED_BASE / character.getBuffedStat('spd');
         character.hasActed = true;
         
         console.log(`重新計算等待時間: ${character.waitTime.toFixed(2)}`);
@@ -1452,17 +1570,22 @@ class GameManager {
 
     // 執行攻擊
     performAttack(attacker, target) {
-        const damage = Math.max(1, attacker.stats.str - target.stats.def);
-        const isDead = target.takeDamage(damage);
-        
+        // 計算基礎傷害（使用buff後的數值）
+        const attackerStr = attacker.getBuffedStat('str');
+        const targetDef = target.getBuffedStat('def');
+        let baseDamage = Math.max(1, attackerStr - targetDef);
+        // 攻擊者buff（傷害加成）
+        let buffedDamage = attacker.getBuffedDamage(baseDamage);
+        // 被攻擊者buff（減傷）
+        const finalDamage = target.getBuffedDamageTaken(buffedDamage);
+        const isDead = target.takeDamage(finalDamage);
         console.log(`${attacker.isEnemy ? '敵人' : '我方'}攻擊${target.isEnemy ? '敵人' : '我方'}!`);
-        console.log(`造成 ${damage} 點傷害`);
+        console.log(`造成 ${finalDamage} 點傷害 (基礎傷害: ${baseDamage}, 攻擊buff後: ${buffedDamage})`);
         console.log(`目標剩餘HP: ${target.stats.hp}/${target.stats.maxhp}`);
-        
         // 先播放攻擊特效，然後顯示傷害數字
         this.addAttackEffect(target.gridX, target.gridY, 0, () => {
             // 攻擊特效完成後顯示傷害數字
-            this.addDamageNumber(damage, target.gridX, target.gridY, () => {
+            this.addDamageNumber(finalDamage, target.gridX, target.gridY, () => {
                 // 傷害動畫完成後的回調
                 console.log('攻擊動畫完成，繼續下一個角色行動');
                 this.completeCharacterAction(attacker);
