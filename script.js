@@ -295,7 +295,14 @@ class Character {
     // 添加buff
     addBuff(buff) {
         this.buffs.push(buff);
-        console.log(`${this.isEnemy ? '敵人' : '我方'}獲得buff: ${buff.name}`);
+        const buffType = buff.isDebuff ? 'debuff' : 'buff';
+        console.log(`${this.isEnemy ? '敵人' : '我方'}獲得${buffType}: ${buff.name}`);
+    }
+    
+    // 添加debuff（便利方法）
+    addDebuff(debuff) {
+        debuff.setDebuff(true);
+        this.addBuff(debuff);
     }
     
     // 移除buff
@@ -308,9 +315,26 @@ class Character {
         this.buffs = [];
     }
     
+    // 清除所有debuff
+    clearDebuffs() {
+        this.buffs = this.buffs.filter(buff => !buff.isDebuff);
+    }
+    
     // 減少buff持續時間（回合結束時調用）
     decreaseBuffDuration() {
         this.buffs = this.buffs.filter(buff => !buff.decreaseDuration());
+    }
+    
+    // 處理所有tick效果（如中毒）
+    processTickEffects() {
+        const tickResults = [];
+        this.buffs.forEach(buff => {
+            const result = buff.processTick(this);
+            if (result) {
+                tickResults.push(result);
+            }
+        });
+        return tickResults;
     }
     
     // 獲取應用buff後的屬性值
@@ -457,18 +481,38 @@ class Character {
 // Buff類
 class Buff {
     constructor(type, value, duration, name, description) {
-        this.type = type;           // buff類型: 'spd', 'str', 'def', 'damage_bonus' 等
+        this.type = type;           // buff類型: 'spd', 'str', 'def', 'damage_bonus', 'poison' 等
         this.value = value;         // buff數值 (可以是固定值或百分比)
         this.isPercentage = false;  // 是否為百分比
         this.duration = duration;   // 持續回合數 (-1 表示永久)
         this.name = name;           // buff名稱
         this.description = description; // buff描述
         this.id = Math.random().toString(36).substr(2, 9); // 唯一ID
+        this.isDebuff = false;      // 是否為debuff
+        
+        // 中毒等特殊效果相關
+        this.tickInterval = 0;      // 發作間隔時間（毫秒）
+        this.lastTickTime = 0;      // 上次發作時間
+        this.tickDamagePercent = 0; // 每次發作造成的百分比傷害
     }
     
     // 設定為百分比buff
     setPercentage(isPercentage = true) {
         this.isPercentage = isPercentage;
+        return this;
+    }
+    
+    // 設定為debuff
+    setDebuff(isDebuff = true) {
+        this.isDebuff = isDebuff;
+        return this;
+    }
+    
+    // 設定中毒參數
+    setPoisonEffect(tickInterval, damagePercent) {
+        this.tickInterval = tickInterval;
+        this.tickDamagePercent = damagePercent;
+        this.lastTickTime = Date.now();
         return this;
     }
     
@@ -487,10 +531,38 @@ class Buff {
             return baseValue * (1 - this.value / 100);
         }
         if (this.isPercentage) {
-            return baseValue * (1 + this.value / 100);
+            if (this.isDebuff) {
+                return baseValue * (1 - this.value / 100); // debuff減少數值
+            } else {
+                return baseValue * (1 + this.value / 100); // buff增加數值
+            }
         } else {
-            return baseValue + this.value;
+            if (this.isDebuff) {
+                return baseValue - this.value; // debuff減少數值
+            } else {
+                return baseValue + this.value; // buff增加數值
+            }
         }
+    }
+    
+    // 檢查並處理中毒等tick效果
+    processTick(character) {
+        if (this.type === 'poison' && this.tickInterval > 0) {
+            const currentTime = Date.now();
+            if (currentTime - this.lastTickTime >= this.tickInterval) {
+                // 中毒發作
+                const damage = Math.round(character.stats.maxhp * this.tickDamagePercent / 100);
+                character.takeDamage(damage);
+                this.lastTickTime = currentTime;
+                
+                console.log(`${character.isEnemy ? '敵人' : '我方'}中毒發作！受到 ${damage} 點傷害`);
+                console.log(`剩餘HP: ${character.stats.hp}/${character.stats.maxhp}`);
+                
+                // 觸發視覺效果
+                return { type: 'poison_damage', damage: damage, character: character };
+            }
+        }
+        return null;
     }
 }
 
@@ -880,6 +952,13 @@ class GameManager {
             enemy.addBuff(reduceBuff);
             console.log(`敵人獲得減傷buff`);
             
+            // 為敵人添加中毒debuff作為測試
+            const poisonDebuff = new Buff('poison', 0, -1, '中毒', '每100時間單位受到最大血量5%的傷害')
+                .setDebuff(true)
+                .setPoisonEffect(100, 5); // 每100毫秒發作一次，造成5%最大血量傷害
+            enemy.addDebuff(poisonDebuff);
+            console.log(`敵人獲得中毒debuff`);
+            
             this.characters = [player, ally1, enemy];
             
             console.log('角色初始化完成');
@@ -1062,8 +1141,31 @@ class GameManager {
             console.log(`${char.isEnemy ? '敵人' : '主角'} 等待時間: ${char.waitTime.toFixed(2)}`);
         });
         
+        // 處理所有角色的tick效果（如中毒）
+        this.processAllTickEffects();
+        
         // 更新佇列顯示
         this.updateActionQueueDisplay();
+    }
+    
+    // 處理所有角色的tick效果
+    processAllTickEffects() {
+        this.characters.forEach(character => {
+            if (character.isAlive()) {
+                const tickResults = character.processTickEffects();
+                
+                // 處理tick效果的視覺回饋
+                tickResults.forEach(result => {
+                    if (result.type === 'poison_damage') {
+                        // 顯示中毒傷害數字
+                        this.addDamageNumber(result.damage, result.character.gridX, result.character.gridY);
+                        
+                        // 重繪場景以更新HP顯示
+                        this.redrawBattleScene();
+                    }
+                });
+            }
+        });
     }
     
     // 角色完成行動
@@ -1560,6 +1662,9 @@ class GameManager {
             this.selectedCharacter.renderY = this.originalPosition.y;
             this.selectedCharacter.facing = GAME_CONFIG.DIRECTION.DOWN; // 恢復朝下
             
+            // 相機回到角色原位置
+            this.centerCameraOnCharacter(this.selectedCharacter);
+            
             this.originalPosition = null;
             this.gameState = 'normal';
             this.hideActionMenu();
@@ -1755,6 +1860,9 @@ class GameManager {
             
             // 使用移動動畫
             enemy.startMovingTo(action.moveX, action.moveY, () => {
+                // 移動完成後讓相機跟隨到敵人位置
+                this.centerCameraOnCharacter(enemy);
+                
                 // 移動完成後執行攻擊或結束回合
                 if (action.type === 'attack') {
                     setTimeout(() => {
@@ -2012,7 +2120,14 @@ class GameManager {
     // 戰鬥頁面事件處理器
     handleBattleKeydown(e) {
         if (e.code === 'Escape') {
-            this.switchPage('mainMenu');
+            // ESC 鍵處理：如果在移動模式下取消移動，否則返回主菜單
+            if (this.gameState === 'moving' && this.originalPosition) {
+                this.cancelMovement();
+            } else if (this.gameState === 'attacking' || this.selectedCharacter) {
+                this.deselectCharacter();
+            } else {
+                this.switchPage('mainMenu');
+            }
         }
         console.log(`戰鬥頁面按鍵: ${e.code}`);
     }
@@ -2100,7 +2215,7 @@ class GameManager {
                     if (this.gameState === 'moving') {
                         // 移動模式下，如果點擊的是同一角色，取消移動
                         if (clickedCharacter === this.selectedCharacter) {
-                            this.deselectCharacter();
+                            this.cancelMovement();
                         } else {
                             this.selectCharacter(clickedCharacter);
                         }
@@ -2146,12 +2261,20 @@ class GameManager {
                                 // 移動完成後的回調
                                 this.gameState = 'moved';
                                 this.movementRange = [];
+                                
+                                // 移動完成後，讓相機跟隨到角色新位置
+                                this.centerCameraOnCharacter(this.selectedCharacter);
+                                
                                 this.showActionMenu(this.selectedCharacter);
                                 this.redrawBattleScene();
                             });
                         } else {
-                            // 點擊範圍外，取消選擇
-                            this.deselectCharacter();
+                            // 點擊範圍外，如果有原始位置說明角色已移動，需要取消移動
+                            if (this.originalPosition) {
+                                this.cancelMovement();
+                            } else {
+                                this.deselectCharacter();
+                            }
                         }
                     } else {
                         // 其他情況取消選擇
