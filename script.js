@@ -1559,18 +1559,18 @@ class GameManager {
         
         if (this.gameState === 'normal') {
             // 正常狀態：移動, 攻擊, 技能1, 技能2, 待機
-            this.addActionButton('移動', () => this.startMovement(character));
-            this.addActionButton('攻擊', () => this.startAttack(character));
+            this.addActionButton('移動(Z)', () => this.startMovement(character));
+            this.addActionButton('攻擊(X)', () => this.startAttack(character));
             this.addActionButton('技能1', () => this.useSkill(character, 1));
             this.addActionButton('技能2', () => this.useSkill(character, 2));
             this.addActionButton('待機', () => this.standby(), 'standby');
         } else if (this.gameState === 'moved') {
             // 移動後狀態：攻擊, 技能1, 技能2, 待機, 取消
-            this.addActionButton('攻擊', () => this.startAttack(character));
+            this.addActionButton('攻擊(X)', () => this.startAttack(character));
             this.addActionButton('技能1', () => this.useSkill(character, 1));
             this.addActionButton('技能2', () => this.useSkill(character, 2));
             this.addActionButton('待機', () => this.standby(), 'standby');
-            this.addActionButton('取消', () => this.cancelMovement(), 'cancel');
+            this.addActionButton('取消(C)', () => this.cancelMovement(), 'cancel');
         }
     }
     
@@ -1584,7 +1584,7 @@ class GameManager {
         // 設置更大的按鈕樣式以適應加倍的選單大小
         button.style.fontSize = '24px';      // 字體大小加倍 (原12px -> 24px)
         button.style.padding = '16px 24px';  // padding加倍 (原8px 12px -> 16px 24px)
-        button.style.minWidth = '100px';     // 最小寬度加倍 (原50px -> 100px)
+        button.style.minWidth = '120px';     // 增加最小寬度以容納快捷鍵文字 (原100px -> 120px)
         button.style.margin = '4px';         // margin加倍 (原2px -> 4px)
         
         this.actionMenu.appendChild(button);
@@ -2112,6 +2112,38 @@ class GameManager {
                 this.deselectCharacter();
             } else {
                 this.switchPage('mainMenu');
+            }
+        } else if (e.code === 'KeyZ') {
+            // Z 鍵：觸發移動功能
+            if (this.selectedCharacter && (this.gameState === 'normal' || this.gameState === 'moved')) {
+                // 如果有選中的角色且處於可以移動的狀態，開始移動
+                this.startMovement(this.selectedCharacter);
+            } else if (this.currentActingCharacter && !this.selectedCharacter) {
+                // 如果當前有行動角色但沒有選中角色，先選中當前行動角色再移動
+                this.selectCharacter(this.currentActingCharacter);
+                this.startMovement(this.currentActingCharacter);
+            }
+        } else if (e.code === 'KeyX') {
+            // X 鍵：觸發攻擊功能
+            if (this.selectedCharacter && (this.gameState === 'normal' || this.gameState === 'moved')) {
+                // 如果有選中的角色且處於可以攻擊的狀態，開始攻擊
+                this.startAttack(this.selectedCharacter);
+            } else if (this.currentActingCharacter && !this.selectedCharacter) {
+                // 如果當前有行動角色但沒有選中角色，先選中當前行動角色再攻擊
+                this.selectCharacter(this.currentActingCharacter);
+                this.startAttack(this.currentActingCharacter);
+            }
+        } else if (e.code === 'KeyC') {
+            // C 鍵：觸發取消功能
+            if (this.gameState === 'moved' && this.originalPosition) {
+                // 如果在移動後狀態且有原始位置，執行取消移動
+                this.cancelMovement();
+            } else if (this.gameState === 'moving') {
+                // 如果在移動模式下，取消移動
+                this.cancelMovement();
+            } else if (this.gameState === 'attacking') {
+                // 如果在攻擊模式下，取消選擇
+                this.deselectCharacter();
             }
         }
         console.log(`戰鬥頁面按鍵: ${e.code}`);
