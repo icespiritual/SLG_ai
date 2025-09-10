@@ -1535,36 +1535,14 @@ class GameManager {
             return;
         }
         
-        // 計算角色在螢幕上的位置
-        const canvasRect = this.battleCanvas.getBoundingClientRect();
+        // 固定選單位置在螢幕底部中央
+        const menuWidth = 500;  // 從250加倍到500
+        const menuHeight = 100; // 從50加倍到100
+        const margin = 20;
         
-        // 模擬點擊處理的逆向計算
-        const simulatedClickX = (character.gridX * GAME_CONFIG.CELL_SIZE + GAME_CONFIG.CELL_SIZE / 2) * this.zoomLevel;
-        const simulatedClickY = (character.gridY * GAME_CONFIG.CELL_SIZE + GAME_CONFIG.CELL_SIZE / 2) * this.zoomLevel;
-        
-        // 轉換為螢幕座標
-        const screenX = canvasRect.left + simulatedClickX;
-        const screenY = canvasRect.top + simulatedClickY;
-        
-        // 計算菜單位置
-        const menuWidth = 250;
-        const menuHeight = 50;
-        const characterSize = GAME_CONFIG.CELL_SIZE * this.zoomLevel;
-        
-        let menuX = screenX - menuWidth / 2;
-        let menuY = screenY + characterSize / 2 + 10;
-        
-        // 邊界檢查
-        const margin = 10;
-        if (menuY + menuHeight > window.innerHeight - margin) {
-            menuY = screenY - characterSize / 2 - menuHeight - 10;
-        }
-        
-        if (menuX < margin) {
-            menuX = margin;
-        } else if (menuX + menuWidth > window.innerWidth - margin) {
-            menuX = window.innerWidth - menuWidth - margin;
-        }
+        // 計算固定位置：螢幕底部中央
+        const menuX = (window.innerWidth - menuWidth) / 2;
+        const menuY = window.innerHeight - menuHeight - margin;
         
         this.actionMenu.style.position = 'fixed';
         this.actionMenu.style.left = menuX + 'px';
@@ -1602,6 +1580,13 @@ class GameManager {
         button.className = 'action-button' + (className ? ' ' + className : '');
         button.textContent = text;
         button.onclick = onClick;
+        
+        // 設置更大的按鈕樣式以適應加倍的選單大小
+        button.style.fontSize = '24px';      // 字體大小加倍 (原12px -> 24px)
+        button.style.padding = '16px 24px';  // padding加倍 (原8px 12px -> 16px 24px)
+        button.style.minWidth = '100px';     // 最小寬度加倍 (原50px -> 100px)
+        button.style.margin = '4px';         // margin加倍 (原2px -> 4px)
+        
         this.actionMenu.appendChild(button);
     }
     
