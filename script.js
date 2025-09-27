@@ -566,6 +566,75 @@ class Buff {
     }
 }
 
+// Buff管理器類
+class BuffManager {
+    constructor() {
+        this.buffConfigs = {};
+        this.loaded = false;
+    }
+    
+    // 加載buff配置
+    async loadBuffConfigs() {
+        try {
+            const response = await fetch('./buffs.json');
+            const data = await response.json();
+            this.buffConfigs = data.buffs;
+            this.loaded = true;
+            console.log('Buff配置加載完成:', this.buffConfigs);
+        } catch (error) {
+            console.error('無法加載buff配置:', error);
+            this.buffConfigs = {};
+            this.loaded = false;
+        }
+    }
+    
+    // 根據ID創建buff
+    createBuff(buffId, customDuration = null) {
+        if (!this.loaded) {
+            console.error('Buff配置尚未加載');
+            return null;
+        }
+        
+        const config = this.buffConfigs[buffId];
+        if (!config) {
+            console.error(`找不到buff配置: ${buffId}`);
+            return null;
+        }
+        
+        const duration = customDuration !== null ? customDuration : config.duration;
+        const buff = new Buff(
+            config.type,
+            config.value,
+            duration,
+            config.name,
+            config.description
+        );
+        
+        // 設定額外屬性
+        if (config.isPercentage) {
+            buff.setPercentage(true);
+        }
+        if (config.isDebuff) {
+            buff.setDebuff(true);
+        }
+        if (config.tickInterval > 0) {
+            buff.setPoisonEffect(config.tickInterval, config.tickDamagePercent);
+        }
+        
+        return buff;
+    }
+    
+    // 獲取所有可用的buff ID
+    getAvailableBuffs() {
+        return Object.keys(this.buffConfigs);
+    }
+    
+    // 獲取buff配置
+    getBuffConfig(buffId) {
+        return this.buffConfigs[buffId];
+    }
+}
+
 // 攻擊特效類
 class AttackEffect {
     constructor(x, y, colorIndex = 0, onComplete = null) {
@@ -746,6 +815,9 @@ class GameManager {
         this.battleCanvas = null;
         this.battleCtx = null;
         
+        // Buff管理器
+        this.buffManager = new BuffManager();
+        
         // 拖曳相關變數
         this.isDragging = false;
         this.dragStartX = 0;
@@ -900,9 +972,11 @@ class GameManager {
             player.isLoaded = true;
             
             // 為主角添加速度增加10%的buff作為測試
-            const speedBuff = new Buff('spd', 10, -1, '敏捷增強', '速度增加10%').setPercentage(true);
-            player.addBuff(speedBuff);
-            console.log(`主角獲得速度buff，當前速度: ${player.stats.spd} -> ${player.getBuffedStat('spd')}`);
+            const speedBuff = this.buffManager.createBuff('speed_boost');
+            if (speedBuff) {
+                player.addBuff(speedBuff);
+                console.log(`主角獲得速度buff，當前速度: ${player.stats.spd} -> ${player.getBuffedStat('spd')}`);
+            }
             
             // 載入第二個我方角色圖片
             const ally1SpriteImage = await this.loadCharacterSprite('001.png', 'chara');
@@ -948,16 +1022,18 @@ class GameManager {
             const enemy = new Character(8, 5, enemySpriteImage, enemyStats, true);
             enemy.isLoaded = true;
             // 為敵人添加減傷10%的buff作為測試
-            const reduceBuff = new Buff('damage_reduce', 10, -1, '減傷', '受到傷害減少10%').setPercentage(true);
-            enemy.addBuff(reduceBuff);
-            console.log(`敵人獲得減傷buff`);
+            const reduceBuff = this.buffManager.createBuff('damage_reduction');
+            if (reduceBuff) {
+                enemy.addBuff(reduceBuff);
+                console.log(`敵人獲得減傷buff`);
+            }
             
             // 為敵人添加中毒debuff作為測試
-            const poisonDebuff = new Buff('poison', 0, -1, '中毒', '每100時間單位受到最大血量5%的傷害')
-                .setDebuff(true)
-                .setPoisonEffect(100, 5); // 每100毫秒發作一次，造成5%最大血量傷害
-            enemy.addDebuff(poisonDebuff);
-            console.log(`敵人獲得中毒debuff`);
+            const poisonDebuff = this.buffManager.createBuff('poison');
+            if (poisonDebuff) {
+                enemy.addDebuff(poisonDebuff);
+                console.log(`敵人獲得中毒debuff`);
+            }
             
             this.characters = [player, ally1, enemy];
             
@@ -1263,7 +1339,11 @@ class GameManager {
     }
 
     // 初始化戰鬥頁面
-    initializeBattlePage() {
+    async initializeBattlePage() {
+        // 首先加載buff配置
+        await this.buffManager.loadBuffConfigs();
+        console.log('可用的Buff:', this.buffManager.getAvailableBuffs());
+        
         this.battleCanvas = document.getElementById('battleCanvas');
         this.battleContainer = document.getElementById('battleContainer');
         this.actionMenu = document.getElementById('actionMenu');
@@ -1278,8 +1358,8 @@ class GameManager {
         this.battleOffsetX = 0;
         this.battleOffsetY = 0;
         
-        // 重置縮放狀態
-        this.zoomLevel = 1.0;
+        // 設置初始縮放狀態
+        this.zoomLevel = 0.9;
         
         // 重置回合
         this.currentTurn = 'player';
