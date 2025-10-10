@@ -480,7 +480,7 @@ class Character {
 
 // Buff類
 class Buff {
-    constructor(type, value, duration, name, description) {
+    constructor(type, value, duration, name, description, configId = null) {
         this.type = type;           // buff類型: 'spd', 'str', 'def', 'damage_bonus', 'poison' 等
         this.value = value;         // buff數值 (可以是固定值或百分比)
         this.isPercentage = false;  // 是否為百分比
@@ -488,6 +488,7 @@ class Buff {
         this.name = name;           // buff名稱
         this.description = description; // buff描述
         this.id = Math.random().toString(36).substr(2, 9); // 唯一ID
+        this.configId = configId;   // 配置ID（用於查找JSON配置）
         this.isDebuff = false;      // 是否為debuff
         
         // 中毒等特殊效果相關
@@ -607,7 +608,8 @@ class BuffManager {
             config.value,
             duration,
             config.name,
-            config.description
+            config.description,
+            buffId  // 傳入配置ID
         );
         
         // 設定額外屬性
@@ -635,7 +637,7 @@ class BuffManager {
     }
 }
 
-// 攻擊特效類
+// 攻撃特效類
 class AttackEffect {
     constructor(x, y, colorIndex = 0, onComplete = null) {
         this.gridX = x;
@@ -1131,6 +1133,12 @@ class GameManager {
                 this.redrawBattleScene();
             }, 500); // 等待鏡頭移動完成後顯示菜單
         }
+        
+        // 在確定當前行動角色後，顯示該角色的buff狀態
+        if (this.currentActingCharacter) {
+            // 顯示當前角色的buff列表
+            this.showCharacterBuffs(this.currentActingCharacter);
+        }
     }
     
     // 將鏡頭移動到指定角色
@@ -1262,6 +1270,9 @@ class GameManager {
         this.gameState = 'normal';
         this.originalPosition = null;
         this.hideActionMenu();
+        
+        // 隱藏buff顯示
+        this.hideCharacterBuffs();
         
         // 更新佇列顯示
         this.updateActionQueueDisplay();
@@ -1431,8 +1442,6 @@ class GameManager {
             ctx.lineTo(cols * cellSize, y);
             ctx.stroke();
         }
-        
-        console.log(`繪製戰鬥網格: ${cols} x ${rows}`);
     }
 
     // 計算角色移動範圍
@@ -1728,7 +1737,7 @@ class GameManager {
         const attackerStr = attacker.getBuffedStat('str');
         const targetDef = target.getBuffedStat('def');
         let baseDamage = Math.max(1, attackerStr - targetDef);
-        // 攻擊者buff（傷害加成）
+        // 攻击者buff（傷害加成）
         let buffedDamage = attacker.getBuffedDamage(baseDamage);
         // 被攻擊者buff（減傷）
         const finalDamage = target.getBuffedDamageTaken(buffedDamage);
@@ -2335,6 +2344,116 @@ class GameManager {
                     }
                 }
             }
+        }
+    }
+
+    // 在GameManager類中添加顯示buff列表的方法
+    showCharacterBuffs(character) {
+        // 移除舊的buff顯示
+        this.hideCharacterBuffs();
+        
+        console.log('=== showCharacterBuffs 調試信息 ===');
+        console.log('character:', character);
+        console.log('character.buffs:', character.buffs);
+        console.log('character.buffs.length:', character.buffs.length);
+        
+        if (!character || character.buffs.length === 0) {
+            console.log('角色沒有buff或buff列表為空');
+            return;
+        }
+        
+        // 創建buff顯示容器
+        const buffContainer = document.createElement('div');
+        buffContainer.id = 'character-buffs-display';
+        buffContainer.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 1002;
+            min-width: 200px;
+            max-width: 300px;
+        `;
+        
+        // 添加標題
+        const title = document.createElement('div');
+        title.textContent = character.isEnemy ? '敵人狀態' : '角色狀態';
+        title.style.cssText = `
+            font-weight: bold;
+            font-size: 16px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #555;
+            padding-bottom: 5px;
+        `;
+        buffContainer.appendChild(title);
+        
+        // 顯示每個buff/debuff
+        character.buffs.forEach((buff, index) => {
+            console.log(`處理第${index + 1}個buff:`, buff);
+            console.log(`buff.configId:`, buff.configId);
+            
+            const buffConfig = this.buffManager.getBuffConfig(buff.configId);
+            console.log(`buffConfig:`, buffConfig);
+            
+            if (buffConfig) {
+                const buffElement = document.createElement('div');
+                buffElement.style.cssText = `
+                    margin-bottom: 8px;
+                    padding: 5px;
+                    border-left: 3px solid ${buff.isDebuff ? '#ff4444' : '#44ff44'};
+                    background: rgba(${buff.isDebuff ? '255, 68, 68' : '68, 255, 68'}, 0.1);
+                `;
+                
+                const nameElement = document.createElement('div');
+                nameElement.textContent = buffConfig.name;
+                nameElement.style.cssText = `
+                    font-weight: bold;
+                    color: ${buff.isDebuff ? '#ff6666' : '#66ff66'};
+                `;
+                
+                const descElement = document.createElement('div');
+                descElement.textContent = buffConfig.description;
+                descElement.style.cssText = `
+                    font-size: 12px;
+                    margin-top: 2px;
+                    color: #ccc;
+                `;
+                
+                // 顯示持續時間（如果不是永久的）
+                if (buff.duration > 0) {
+                    const durationElement = document.createElement('div');
+                    durationElement.textContent = `剩餘回合: ${buff.duration}`;
+                    durationElement.style.cssText = `
+                        font-size: 11px;
+                        margin-top: 2px;
+                        color: #aaa;
+                        font-style: italic;
+                    `;
+                    buffElement.appendChild(nameElement);
+                    buffElement.appendChild(descElement);
+                    buffElement.appendChild(durationElement);
+                } else {
+                    buffElement.appendChild(nameElement);
+                    buffElement.appendChild(descElement);
+                }
+                
+                buffContainer.appendChild(buffElement);
+            } else {
+                console.log(`找不到buff配置: ${buff.configId}`);
+            }
+        });
+        
+        document.body.appendChild(buffContainer);
+    }
+
+    hideCharacterBuffs() {
+        const existingDisplay = document.getElementById('character-buffs-display');
+        if (existingDisplay) {
+            existingDisplay.remove();
         }
     }
 }
